@@ -9,4 +9,4 @@ molecule_validation:
   target_weight: 1.0
   antitarget_weight: 1.5
   # Molecular property requirements
-  min_heavy_atoms: 23  
+  min_heavy_atoms: 24  
