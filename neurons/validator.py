@@ -12,6 +12,7 @@ from substrateinterface import SubstrateInterface
 import requests
 import hashlib
 import subprocess
+import time
 from dotenv import load_dotenv
 from bittensor.core.chain_data.utils import decode_metadata
 
@@ -153,7 +154,7 @@ def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "by
     Args:
         current_commitments (dict): A dictionary of miner commitments where each value contains:
             - uid: Miner's unique identifier
-            - data: GitHub URL path containing the encrypted submission
+            - data: GitHub URL path containing the encrypted submission 
             - Other commitment metadata
         headers (dict, optional): HTTP request headers for fetching content. 
             Defaults to {"Range": "bytes=0-1024"} to limit response size.
@@ -166,37 +167,55 @@ def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "by
         - Only processes commitments where data contains a '/' (indicating a GitHub URL)
         - Uses btd.decrypt_dict for decryption of the fetched submissions
         - Logs errors for failed HTTP requests and submission counts
+        - Implements retry logic with exponential backoff for GitHub requests
     """
     encrypted_submissions = {}
+    max_retries = 3
+    base_delay = 1  # seconds
+
     for commit in current_commitments.values():
         if '/' in commit.data: # Filter only url submissions
-            try:
-                full_url = f"https://raw.githubusercontent.com/{commit.data}"
-                response = requests.get(full_url, headers=headers)
-                if response.status_code in [200, 206]:
-                    encrypted_content = response.content
-                    content_hash = hashlib.sha256(encrypted_content.decode('utf-8').encode('utf-8')).hexdigest()[:20]
+            retry_count = 0
+            while retry_count < max_retries:
+                try:
+                    full_url = f"https://raw.githubusercontent.com/{commit.data}"
+                    response = requests.get(full_url, headers=headers)
+                    if response.status_code in [200, 206]:
+                        encrypted_content = response.content
+                        content_hash = hashlib.sha256(encrypted_content.decode('utf-8').encode('utf-8')).hexdigest()[:20]
 
-                    # Disregard any submissions that don't match the expected filename
-                    if not full_url.endswith(f'/{content_hash}.txt'):
-                        bt.logging.error(f"Filename for {commit.uid} is not compatible with expected content hash")
-                        continue
-                    encrypted_content = encrypted_content.decode('utf-8', errors='replace')
+                        # Disregard any submissions that don't match the expected filename
+                        if not full_url.endswith(f'/{content_hash}.txt'):
+                            bt.logging.error(f"Filename for {commit.uid} is not compatible with expected content hash")
+                            break
+                        encrypted_content = encrypted_content.decode('utf-8', errors='replace')
 
-                    # Safely evaluate the input string as a Python literal.
-                    encrypted_content = tuple_safe_eval(encrypted_content)
-                    if encrypted_content is None:
-                        bt.logging.error(f"Encrypted content for {commit.uid} is not a tuple")
-                        continue
+                        # Safely evaluate the input string as a Python literal.
+                        encrypted_content = tuple_safe_eval(encrypted_content)
+                        if encrypted_content is None:
+                            bt.logging.error(f"Encrypted content for {commit.uid} is not a tuple")
+                            break
 
-                    encrypted_submissions[commit.uid] = (encrypted_content[0], encrypted_content[1])
-                else:
-                    bt.logging.error(f"Error fetching encrypted submission: {response.status_code}")
-                    bt.logging.error(f"uid: {commit.uid}, commited data: {commit.data}")
-                    continue
-            except Exception as e:
-                bt.logging.error(f"Error handling submission for uid {commit.uid}: {e}")
-                continue
+                        encrypted_submissions[commit.uid] = (encrypted_content[0], encrypted_content[1])
+                        break  # Success, exit retry loop
+                    else:
+                        retry_count += 1
+                        if retry_count < max_retries:
+                            delay = base_delay * (2 ** (retry_count - 1))  # Exponential backoff
+                            bt.logging.warning(f"Retry {retry_count}/{max_retries} for UID {commit.uid} after {delay}s delay. Status code: {response.status_code}")
+                            time.sleep(delay)
+                        else:
+                            bt.logging.error(f"Failed to fetch encrypted submission after {max_retries} retries: {response.status_code}")
+                            bt.logging.error(f"uid: {commit.uid}, commited data: {commit.data}")
+                
+                except Exception as e:
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        delay = base_delay * (2 ** (retry_count - 1))  # Exponential backoff
+                        bt.logging.warning(f"Retry {retry_count}/{max_retries} for UID {commit.uid} after {delay}s delay. Error: {str(e)}")
+                        time.sleep(delay)
+                    else:
+                        bt.logging.error(f"Error handling submission for uid {commit.uid} after {max_retries} retries: {e}")
 
     bt.logging.info(f"Encrypted submissions: {len(encrypted_submissions)}")
     
@@ -209,7 +228,7 @@ def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "by
     bt.logging.info(f"Decrypted submissions: {len(decrypted_submissions)}")
             
     return decrypted_submissions
-
+    
 def score_protein_for_all_uids(
     protein: str,
     score_dict: dict[int, dict[str, list[float]]],
