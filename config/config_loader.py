@@ -12,18 +12,29 @@ def load_config(path: str = "config/config.yaml"):
         config = yaml.safe_load(f)
 
     # Load configuration options
-    num_targets = config["protein_selection"]["num_targets"]
+    weekly_target = config["protein_selection"]["weekly_target"]
     num_antitargets = config["protein_selection"]["num_antitargets"]
+
+    no_submission_blocks = config["competition"]["no_submission_blocks"]
     
     validation_config = config["molecule_validation"]
-    target_weight = validation_config["target_weight"]
     antitarget_weight = validation_config["antitarget_weight"]
     min_heavy_atoms = validation_config["min_heavy_atoms"]
+    num_molecules = validation_config["num_molecules"]
+    entropy_weight = validation_config["entropy_weight"]
+    entropy_bonus_threshold = validation_config["entropy_bonus_threshold"]
+    molecule_repetition_weight = validation_config["molecule_repetition_weight"]
+    molecule_repetition_threshold = validation_config["molecule_repetition_threshold"]
 
     return {
-        'num_targets': num_targets,
+        'weekly_target': weekly_target,
         'num_antitargets': num_antitargets,
-        'target_weight': target_weight,
+        'no_submission_blocks': no_submission_blocks,
         'antitarget_weight': antitarget_weight,
         'min_heavy_atoms': min_heavy_atoms,
+        'num_molecules': num_molecules,
+        'entropy_weight': entropy_weight,
+        'entropy_bonus_threshold': entropy_bonus_threshold,
+        'molecule_repetition_weight': molecule_repetition_weight,
+        'molecule_repetition_threshold': molecule_repetition_threshold
     }

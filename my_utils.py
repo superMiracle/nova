@@ -5,8 +5,10 @@ from dotenv import load_dotenv
 import bittensor as bt
 from datasets import load_dataset
 import random
-
-import asyncio
+from rdkit import Chem
+from rdkit.Chem import MACCSkeys
+import numpy as np
+import math
 
 load_dotenv(override=True)
 
@@ -70,30 +72,6 @@ def get_smiles(product_name):
 
     return data.get("smiles")
 
-def get_random_protein():
-    api_key = os.environ.get("VALIDATOR_API_KEY")
-    if not api_key:
-        raise ValueError("validator_api_key environment variable not set contact nova team for api key.")
-
-    url = "https://rvhs77j663.execute-api.us-east-1.amazonaws.com/prod/random-protein-of-interest"
-    headers = {"x-api-key": api_key}
-
-    response = requests.get(url, headers=headers)
-    if response.status_code != 200:
-        raise RuntimeError(f"API call failed: {response.status_code} {response.text}")
-
-    data = response.json()
-
-    if "body" in data:
-        inner_body_str = data["body"]  # e.g. '{"uniprot_code": "A0S183", "protein_sequence": "..."}'
-        try:
-            inner_data = json.loads(inner_body_str) 
-            return inner_data.get("uniprot_code")
-        except json.JSONDecodeError as e:
-            raise RuntimeError(f"Could not parse body as JSON: {e}")
-    else:
-        bt.logging.error("Unexpected API response structure.")
-
 def get_sequence_from_protein_code(protein_code:str) -> str:
 
     url = f"https://rest.uniprot.org/uniprotkb/{protein_code}.fasta"
@@ -107,15 +85,15 @@ def get_sequence_from_protein_code(protein_code:str) -> str:
         amino_acid_sequence = ''.join(sequence_lines)
         return amino_acid_sequence
 
-def get_challenge_proteins_from_blockhash(block_hash: str, num_targets: int, num_antitargets: int) -> dict:
+def get_challenge_proteins_from_blockhash(block_hash: str, weekly_target: str, num_antitargets: int) -> dict:
     """
     Use block_hash as a seed to pick 'num_targets' and 'num_antitargets' random entries
     from the 'Metanova/Proteins' dataset. Returns {'targets': [...], 'antitargets': [...]}.
     """
     if not (isinstance(block_hash, str) and block_hash.startswith("0x")):
         raise ValueError("block_hash must start with '0x'.")
-    if num_targets < 0 or num_antitargets < 0:
-        raise ValueError("num_targets and num_antitargets must be non-negative.")
+    if not weekly_target or num_antitargets < 0:
+        raise ValueError("weekly_target must exist and num_antitargets must be non-negative.")
 
     # Convert block hash to an integer seed
     try:
@@ -137,14 +115,13 @@ def get_challenge_proteins_from_blockhash(block_hash: str, num_targets: int, num
         raise ValueError("Dataset is empty; cannot pick random entries.")
 
     # Grab all required indices at once, ensure uniqueness
-    unique_indices = rng.sample(range(dataset_size), k=(num_targets + num_antitargets))
+    unique_indices = rng.sample(range(dataset_size), k=(num_antitargets))
 
-    # Split the first 'num_targets' for targets, the rest for antitargets
-    target_indices = unique_indices[:num_targets]
-    antitarget_indices = unique_indices[num_targets:]
+    # Split indices for antitargets
+    antitarget_indices = unique_indices[:num_antitargets]
 
     # Convert indices to protein codes
-    targets = [dataset[i]["Entry"] for i in target_indices]
+    targets = [weekly_target]
     antitargets = [dataset[i]["Entry"] for i in antitarget_indices]
 
     return {
@@ -177,3 +154,37 @@ def get_heavy_atom_count(smiles: str) -> int:
     
     return count
     
+def compute_maccs_entropy(smiles_list: list[str]) -> float:
+    """
+    Computes fingerprint entropy from MACCS keys for a list of SMILES.
+
+    Parameters:
+        smiles_list (list of str): Molecules in SMILES format.
+
+    Returns:
+        avg_entropy (float): Average entropy per bit.
+    """
+    n_bits = 167  # RDKit uses 167 bits (index 0 is always 0)
+    bit_counts = np.zeros(n_bits)
+    valid_mols = 0
+
+    for smi in smiles_list:
+        mol = Chem.MolFromSmiles(smi)
+        if mol:
+            fp = MACCSkeys.GenMACCSKeys(mol)
+            arr = np.array(fp)
+            bit_counts += arr
+            valid_mols += 1
+
+    if valid_mols == 0:
+        raise ValueError("No valid molecules found.")
+
+    probs = bit_counts / valid_mols
+    entropy_per_bit = np.array([
+        -p * math.log2(p) - (1 - p) * math.log2(1 - p) if 0 < p < 1 else 0
+        for p in probs
+    ])
+
+    avg_entropy = np.mean(entropy_per_bit)
+
+    return avg_entropy

@@ -61,6 +61,7 @@ class AbstractBittensorDrandTimelock:
     """Class for Drand-based timelock encryption and decryption using the timelock library."""
     #DRAND_URL: str = "https://api.drand.sh"  # more 500 than 200
     DRAND_URL: str = "https://drand.cloudflare.com"
+    EPOCH_LENGTH = 360  # Number of blocks per epoch
 
     def __init__(self) -> None:
         """Initialize the Timelock client."""
@@ -84,13 +85,29 @@ class AbstractBittensorDrandTimelock:
     def get_current_round(self) -> int:
         return int(time.time()- self.NET_START) // self.ROUND_DURATION 
 
-    def encrypt(self, uid: int, message: str, rounds: int = 1) -> Tuple[int, bytes]:
+    def encrypt(self, uid: int, message: str, current_block: int) -> Tuple[int, bytes]:
         """
         Encrypt a message with a future Drand round key, prefixing it with the UID.
-        Returns a tuple of (target_round, encrypted_message).
+        The target round is calculated to be within the last 10 blocks of the competition.
+        
+        Args:
+            uid: The user ID
+            message: The message to encrypt
+            current_block: The current block number
+            
+        Returns:
+            A tuple of (target_round, encrypted_message)
         """
-        target_round: int = self.get_current_round() + rounds
-        bt.logging.info(f"Encrypting message for UID {uid}... Unlockable at round {target_round}")
+        # Calculate the next epoch boundary
+        next_epoch_boundary = ((current_block // self.EPOCH_LENGTH) + 1) * self.EPOCH_LENGTH
+        # Target round should be 10 blocks before the epoch boundary
+        target_block = next_epoch_boundary - 10
+        
+        # Convert block number to Drand round
+        # Each block is roughly 12 seconds, and Drand round is 3 seconds
+        target_round: int = self.get_current_round() + ((target_block - current_block) * 4)
+        
+        bt.logging.info(f"Encrypting message for UID {uid}... Unlockable at round {target_round} (block {target_block})")
 
         prefixed_message: str = f"{uid}:{message}"
         sk = secrets.token_bytes(32)  # an ephemeral secret key
@@ -115,7 +132,7 @@ class AbstractBittensorDrandTimelock:
         # key: bytes = self._derive_key(randomness)
         # cipher: Fernet = Fernet(key)
         # decrypted_message: str = cipher.decrypt(encrypted_message).decode()
-        print(repr(ciphertext))
+        #print(repr(ciphertext))
         plaintext = self.tl.tld(ciphertext, signature).decode()
 
         expected_prefix = f"{uid}:"
