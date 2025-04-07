@@ -552,7 +552,7 @@ async def main(config):
             current_block = await subtensor.get_current_block()
 
             # Check if the current block marks the end of an epoch (using a 360-block interval).
-            if current_block % config.epoch_length != 0:
+            if current_block % config.epoch_length == 0:
 
                 try:
                     start_block = current_block - config.epoch_length
