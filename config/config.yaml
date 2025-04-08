@@ -1,7 +1,7 @@
 # Number of targets and antitargets to select
 protein_selection:
   num_targets: 1
-  num_antitargets: 8  
+  num_antitargets: 4  
 
 # Parameters for validating and scoring molecules
 molecule_validation:
@@ -9,4 +9,4 @@ molecule_validation:
   target_weight: 1.0
   antitarget_weight: 1.0
   # Molecular property requirements
-  min_heavy_atoms: 24  
+  min_heavy_atoms: 26  
