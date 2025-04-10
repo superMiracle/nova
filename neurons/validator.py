@@ -14,6 +14,7 @@ import hashlib
 import subprocess
 import time
 from dotenv import load_dotenv
+import yaml
 from bittensor.core.chain_data.utils import decode_metadata
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -147,6 +148,18 @@ def tuple_safe_eval(input_str: str) -> tuple:
     
     return result
 
+def get_min_heavy_atoms_from_github():
+    url = "https://raw.githubusercontent.com/metanova-labs/nova/main/config/config.yaml"
+    response = requests.get(url, timeout=5)
+    config = yaml.safe_load(response.text)
+    return config["molecule_validation"]["min_heavy_atoms"]
+
+def get_antitarget_weight_from_github():
+    url = "https://raw.githubusercontent.com/metanova-labs/nova/main/config/config.yaml"
+    response = requests.get(url, timeout=5)
+    config = yaml.safe_load(response.text)
+    return config["molecule_validation"]["antitarget_weight"]
+
 def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "bytes=0-1024"}) -> dict:
     """
     Decrypts submissions from validators by fetching encrypted content from GitHub URLs and decrypting them.
@@ -240,6 +253,7 @@ def score_protein_for_all_uids(
     Initialize PSICHIC once for 'protein' and score each UID's molecule, 
     storing results in the appropriate (target or antitarget) index of 'score_dict'.
     """
+    min_heavy_atoms = get_min_heavy_atoms_from_github()
     # Initialize PSICHIC for new protein
     bt.logging.info(f'Initializing model for protein code: {protein}')
     protein_sequence = get_sequence_from_protein_code(protein)
@@ -269,8 +283,8 @@ def score_protein_for_all_uids(
         if not smiles:
             bt.logging.debug(f"No SMILES found for UID={uid}, molecule='{data['molecule']}'.")
 
-        elif get_heavy_atom_count(smiles) < config['min_heavy_atoms']:
-            bt.logging.info(f"UID: {uid}, SMILES: {smiles} has less than {config['min_heavy_atoms']} heavy atoms, scoring -inf")
+        elif get_heavy_atom_count(smiles) < min_heavy_atoms:
+            bt.logging.info(f"UID: {uid}, SMILES: {smiles} has less than {min_heavy_atoms} heavy atoms, scoring -inf")
 
         else:
             try:
@@ -299,6 +313,8 @@ def determine_winner(
     submission block on a final score tie, and returns the winning UID.
     Returns None if no valid scores are found.
     """
+    antitarget_weight = get_antitarget_weight_from_github()
+
     best_score = -math.inf
     best_uid = None
     best_block_submitted = math.inf  # Track earliest block in tie-break
@@ -321,7 +337,7 @@ def determine_winner(
             antitarget_sum = sum(antitargets)
             antitarget_score = antitarget_sum / len(antitargets)
 
-            final_score = (config['target_weight'] * target_score) - (config['antitarget_weight'] * antitarget_score)
+            final_score = (config['target_weight'] * target_score) - (antitarget_weight * antitarget_score)
         else:
             final_score = -math.inf
 
