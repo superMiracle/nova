@@ -1,9 +1,12 @@
-
 import sys
 import argparse
 import bittensor as bt
+import os
+from dotenv import load_dotenv
 
 def main():
+    load_dotenv()
+    
     # 1) Parse the single argument for target_uid
     parser = argparse.ArgumentParser(
         description="Set weights on netuid=68 so that only target_uid has weight=1."
@@ -24,8 +27,10 @@ def main():
         hotkey=args.wallet_hotkey, 
     )
 
-    # Create Subtensor connection
-    subtensor = bt.subtensor()
+    # Create Subtensor connection using network from .env
+    subtensor_network = os.getenv('SUBTENSOR_NETWORK')
+    subtensor = bt.subtensor(network=subtensor_network)
+
 
     # Download the metagraph for netuid=68
     metagraph = subtensor.metagraph(NETUID)
