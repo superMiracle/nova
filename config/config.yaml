@@ -7,6 +7,6 @@ protein_selection:
 molecule_validation:
   # Scoring weights for target/antitarget binding
   target_weight: 1.0
-  antitarget_weight: 1.0
+  antitarget_weight: 0.75
   # Molecular property requirements
   min_heavy_atoms: 26  
