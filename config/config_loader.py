@@ -20,6 +20,8 @@ def load_config(path: str = "config/config.yaml"):
     validation_config = config["molecule_validation"]
     antitarget_weight = validation_config["antitarget_weight"]
     min_heavy_atoms = validation_config["min_heavy_atoms"]
+    min_rotatable_bonds = validation_config["min_rotatable_bonds"]
+    max_rotatable_bonds = validation_config["max_rotatable_bonds"]
     num_molecules = validation_config["num_molecules"]
     entropy_weight = validation_config["entropy_weight"]
     entropy_bonus_threshold = validation_config["entropy_bonus_threshold"]
@@ -32,6 +34,8 @@ def load_config(path: str = "config/config.yaml"):
         'no_submission_blocks': no_submission_blocks,
         'antitarget_weight': antitarget_weight,
         'min_heavy_atoms': min_heavy_atoms,
+        'min_rotatable_bonds': min_rotatable_bonds,
+        'max_rotatable_bonds': max_rotatable_bonds,
         'num_molecules': num_molecules,
         'entropy_weight': entropy_weight,
         'entropy_bonus_threshold': entropy_bonus_threshold,

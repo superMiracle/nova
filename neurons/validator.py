@@ -17,6 +17,8 @@ from dotenv import load_dotenv
 from bittensor.core.chain_data.utils import decode_metadata
 import aiohttp
 import numpy as np
+from rdkit import Chem
+from rdkit.Chem import Descriptors
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(BASE_DIR)
@@ -256,6 +258,14 @@ def validate_molecules_and_calculate_entropy(
     for uid, data in uid_to_data.items():
         valid_smiles = []
         valid_names = []
+        
+        # Check for duplicate molecules in submission
+        if len(data["molecules"]) != len(set(data["molecules"])):
+            bt.logging.error(f"UID={uid} submission contains duplicate molecules")
+            score_dict[uid]["entropy"] = None
+            score_dict[uid]["block_submitted"] = None
+            continue
+            
         for molecule in data["molecules"]:
             try:
                 smiles = get_smiles(molecule)
@@ -267,6 +277,20 @@ def validate_molecules_and_calculate_entropy(
                 
                 if get_heavy_atom_count(smiles) < config['min_heavy_atoms']:
                     bt.logging.error(f"UID={uid}, molecule='{molecule}' has insufficient heavy atoms")
+                    valid_smiles = []
+                    valid_names = []
+                    break
+
+                try:
+                    mol = Chem.MolFromSmiles(smiles)
+                    num_rotatable_bonds = Descriptors.NumRotatableBonds(mol)
+                    if num_rotatable_bonds < config['min_rotatable_bonds'] or num_rotatable_bonds > config['max_rotatable_bonds']:
+                        bt.logging.error(f"UID={uid}, molecule='{molecule}' has an invalid number of rotatable bonds")
+                        valid_smiles = []
+                        valid_names = []
+                        break
+                except Exception as e:
+                    bt.logging.error(f"Molecule is not parseable by RDKit for UID={uid}, molecule='{molecule}': {e}")
                     valid_smiles = []
                     valid_names = []
                     break
@@ -390,14 +414,15 @@ def calculate_final_scores(
 
     # Go through each UID scored
     for uid, data in valid_molecules_by_uid.items():
+        print(score_dict[uid])
         targets = score_dict[uid]['target_scores']
         antitargets = score_dict[uid]['antitarget_scores']
         entropy = score_dict[uid]['entropy']
         submission_block = score_dict[uid]['block_submitted']
 
         # Replace None with -inf
-        targets = [[-math.inf if s == -math.inf else s for s in sublist] for sublist in targets]
-        antitargets = [[-math.inf if s == -math.inf else s for s in sublist] for sublist in antitargets]
+        targets = [[-math.inf if not s else s for s in sublist] for sublist in targets]
+        antitargets = [[-math.inf if not s else s for s in sublist] for sublist in antitargets]
 
         # Get number of molecules (length of any target score list)
         if not targets or not targets[0]:
@@ -516,6 +541,7 @@ def determine_winner(score_dict: dict[int, dict[str, list[list[float]]]]) -> Opt
     # If there is still a tie, return the uid with the highest molecule score
     else:
         highest_molecule_score = -math.inf
+        winner = None
         for uid in tie_winner:
             if score_dict[uid]['molecule_scores_after_repetition'] is not None:
                 if max(score_dict[uid]['molecule_scores_after_repetition']) > highest_molecule_score:
