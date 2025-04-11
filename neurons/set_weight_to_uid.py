@@ -3,6 +3,7 @@ import argparse
 import bittensor as bt
 import os
 from dotenv import load_dotenv
+import time
 
 def main():
     load_dotenv()
@@ -38,7 +39,7 @@ def main():
     # Check registration
     hotkey_ss58 = wallet.hotkey.ss58_address
     if hotkey_ss58 not in metagraph.hotkeys:
-        print(f"Hotkey {hotkey_ss58} is not registered on netuid {NETUID}. Exiting.")
+        bt.logging.error(f"Hotkey {hotkey_ss58} is not registered on netuid {NETUID}. Exiting.")
         sys.exit(1)
 
     # 2) Build the weight vector
@@ -47,22 +48,36 @@ def main():
 
     # Validate the user-provided target UID
     if not (0 <= args.target_uid < n):
-        print(f"Error: target_uid {args.target_uid} out of range [0, {n-1}]. Exiting.")
+        bt.logging.error(f"Error: target_uid {args.target_uid} out of range [0, {n-1}]. Exiting.")
         sys.exit(1)
 
     # Set the single weight
     weights[args.target_uid] = 1.0
 
-    # 3) Send the weights to the chain
-    print(f"Setting weight=1 on UID={args.target_uid} (netuid={NETUID}), 0 on others.")
-    result = subtensor.set_weights(
-        netuid=NETUID,
-        wallet=wallet,
-        uids=metagraph.uids,
-        weights=weights,
-        wait_for_inclusion=True
-    )
-    print(f"Result from set_weights: {result}")
+    # 3) Send the weights to the chain with retry logic
+    max_retries = 3
+    delay_between_retries = 12  # seconds
+    for attempt in range(max_retries):
+        try:
+            bt.logging.info(f"Attempt {attempt + 1} to set weights.")
+            result = subtensor.set_weights(
+                netuid=NETUID,
+                wallet=wallet,
+                uids=metagraph.uids,
+                weights=weights,
+                wait_for_inclusion=True
+            )
+            bt.logging.info(f"Result from set_weights: {result}")
+            break  # Exit loop if successful
+        except Exception as e:
+            bt.logging.error(f"Error setting weights: {e}")
+            if attempt < max_retries - 1:
+                bt.logging.info(f"Retrying in {delay_between_retries} seconds...")
+                time.sleep(delay_between_retries)
+            else:
+                bt.logging.error("Failed to set weights after multiple attempts. Exiting.")
+                sys.exit(1)
+
     print("Done.")
 
 if __name__ == "__main__":
