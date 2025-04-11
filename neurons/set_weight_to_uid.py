@@ -39,7 +39,7 @@ def main():
     # Check registration
     hotkey_ss58 = wallet.hotkey.ss58_address
     if hotkey_ss58 not in metagraph.hotkeys:
-        bt.logging.error(f"Hotkey {hotkey_ss58} is not registered on netuid {NETUID}. Exiting.")
+        print(f"Hotkey {hotkey_ss58} is not registered on netuid {NETUID}. Exiting.")
         sys.exit(1)
 
     # 2) Build the weight vector
@@ -48,7 +48,7 @@ def main():
 
     # Validate the user-provided target UID
     if not (0 <= args.target_uid < n):
-        bt.logging.error(f"Error: target_uid {args.target_uid} out of range [0, {n-1}]. Exiting.")
+        print(f"Error: target_uid {args.target_uid} out of range [0, {n-1}]. Exiting.")
         sys.exit(1)
 
     # Set the single weight
@@ -59,7 +59,7 @@ def main():
     delay_between_retries = 12  # seconds
     for attempt in range(max_retries):
         try:
-            bt.logging.info(f"Attempt {attempt + 1} to set weights.")
+            print(f"Attempt {attempt + 1} to set weights.")
             result = subtensor.set_weights(
                 netuid=NETUID,
                 wallet=wallet,
@@ -67,15 +67,15 @@ def main():
                 weights=weights,
                 wait_for_inclusion=True
             )
-            bt.logging.info(f"Result from set_weights: {result}")
+            print(f"Result from set_weights: {result}")
             break  # Exit loop if successful
         except Exception as e:
-            bt.logging.error(f"Error setting weights: {e}")
+            print(f"Error setting weights: {e}")
             if attempt < max_retries - 1:
-                bt.logging.info(f"Retrying in {delay_between_retries} seconds...")
+                print(f"Retrying in {delay_between_retries} seconds...")
                 time.sleep(delay_between_retries)
             else:
-                bt.logging.error("Failed to set weights after multiple attempts. Exiting.")
+                print("Failed to set weights after multiple attempts. Exiting.")
                 sys.exit(1)
 
     print("Done.")

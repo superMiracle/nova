@@ -1,12 +1,26 @@
 # Number of targets and antitargets to select
 protein_selection:
-  num_targets: 1
+  weekly_target: "Q5T382"
   num_antitargets: 4  
 
 # Parameters for validating and scoring molecules
 molecule_validation:
   # Scoring weights for target/antitarget binding
-  target_weight: 1.0
   antitarget_weight: 0.75
+  # Scoring weights for entropy
+  entropy_weight: 1
+  entropy_bonus_threshold: 0
+  # Scoring weights for molecule repetition
+  molecule_repetition_weight: 1
+  molecule_repetition_threshold: 0
   # Molecular property requirements
-  min_heavy_atoms: 26  
+  min_heavy_atoms: 20
+  min_rotatable_bonds: 1
+  max_rotatable_bonds: 10
+  # Number of molecules to validate
+  num_molecules: 10
+
+# Competition parameters
+competition:
+  # No submission blocks
+  no_submission_blocks: 10

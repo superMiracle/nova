@@ -25,8 +25,8 @@ import pandas as pd
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(BASE_DIR)
 
-from config.config_loader import load_protein_selection_params
-from my_utils import get_sequence_from_protein_code, upload_file_to_github, get_challenge_proteins_from_blockhash
+from config.config_loader import load_config
+from my_utils import get_sequence_from_protein_code, upload_file_to_github, get_challenge_proteins_from_blockhash, get_heavy_atom_count, compute_maccs_entropy
 from PSICHIC.wrapper import PsichicWrapper
 from btdr import QuicknetBittensorDrandTimelock
 
@@ -55,7 +55,7 @@ def parse_arguments() -> argparse.Namespace:
     config = bt.config(parser)
 
     # Load protein selection params
-    config.num_targets, config.num_antitargets = load_protein_selection_params(os.path.join(BASE_DIR, 'config/config.yaml'))
+    config.update(load_config())
 
     # Final logging dir
     config.full_path = os.path.expanduser(
@@ -203,7 +203,7 @@ def stream_random_chunk_from_dataset(dataset_repo: str, chunk_size: int) -> Any:
 async def run_psichic_model_loop(state: Dict[str, Any]) -> None:
     """
     Continuously runs the PSICHIC model on batches of molecules from Hugging Face dataset.
-    Updates the best candidate whenever a higher score is found.
+    Updates the best candidate whenever a higher score is found, but only submits when close to epoch end.
 
     Args:
         state (dict): A shared state dict containing references to:
@@ -228,6 +228,12 @@ async def run_psichic_model_loop(state: Dict[str, Any]) -> None:
                 # Clean data
                 df['product_name'] = df['product_name'].apply(lambda x: x.replace('"', ''))
                 df['product_smiles'] = df['product_smiles'].apply(lambda x: x.replace('"', ''))
+
+                # Filter by min_heavy_atoms
+                df['heavy_atoms'] = df['product_smiles'].apply(lambda x: get_heavy_atom_count(x))
+                df = df[df['heavy_atoms'] >= state['config'].min_heavy_atoms]
+                if df.empty or len(df) < state['config'].num_molecules:
+                    continue
 
                 # Run inference for all targets and antitargets
                 target_scores = []
@@ -268,28 +274,38 @@ async def run_psichic_model_loop(state: Dict[str, Any]) -> None:
                 # Calculate average scores
                 df['target_affinity'] = pd.DataFrame(target_scores).mean(axis=0)
                 df['antitarget_affinity'] = pd.DataFrame(antitarget_scores).mean(axis=0)
-                df['affinity_difference'] = df['target_affinity'] - df['antitarget_affinity']
+                df['combined_score'] = df['target_affinity'] - state['config'].antitarget_weight * df['antitarget_affinity']
 
-                # Sort by difference
-                df.sort_values(by='affinity_difference', ascending=False, inplace=True)
+                # Sort by combined score
+                df.sort_values(by=['combined_score'], ascending=[False], inplace=True)
                 df.reset_index(drop=True, inplace=True)
 
-                top_diff = df['affinity_difference'].iloc[0]
-                if top_diff > state['best_score']:
-                    candidate_molecule = df['product_smiles'].iloc[0]
-                    state['best_score'] = top_diff
-                    state['candidate_product'] = df.loc[
-                        df['product_smiles'] == candidate_molecule, 'product_name'
-                    ].iloc[0]
-                    bt.logging.info(f"New best score: {state['best_score']}, Candidate: {state['candidate_product']}")
-
-                    # Throttle how often we commit
-                    last_sub_time = state['last_submission_time']
-                    time_since_last = (datetime.datetime.now() - last_sub_time).total_seconds() if last_sub_time else float('inf')
-                    bt.logging.info(f"Time since last submission: {time_since_last:.2f}s, Required interval: {state['submission_interval']}s")
+                # Select top 10 molecules
+                top_molecules = df.iloc[:10]
+                if not top_molecules.empty:
+                    entropy = compute_maccs_entropy(top_molecules['product_smiles'].tolist())
+                    scores_sum = top_molecules['combined_score'].sum()
                     
-                    if not last_sub_time or time_since_last > state['submission_interval']:
-                        bt.logging.info(f"Submission interval check passed. Last product: {state['last_submitted_product']}, Current: {state['candidate_product']}")
+                    if scores_sum > state['config'].entropy_bonus_threshold:
+                        final_score = scores_sum * (state['config'].entropy_weight + entropy)
+                    else:
+                        final_score = scores_sum
+
+                    if final_score > state['best_score']:
+                        state['best_score'] = final_score
+                        state['candidate_product'] = ','.join(top_molecules['product_name'].tolist())
+                        bt.logging.info(f"New best score: {state['best_score']}, Candidates: {state['candidate_product']}")
+
+                    # Only submit if we're close to epoch end (20 blocks away)
+                    # Check if we're close to epoch end (20 blocks away)
+                    current_block = await state['subtensor'].get_current_block()
+                    next_epoch_block = ((current_block // state['epoch_length']) + 1) * state['epoch_length']
+                    blocks_until_epoch = next_epoch_block - current_block
+                    
+                    bt.logging.debug(f"Current block: {current_block}, Epoch length: {state['epoch_length']}, Next epoch block: {next_epoch_block}, Blocks until epoch: {blocks_until_epoch}")
+                    
+                    if state['candidate_product'] and blocks_until_epoch <= 20:
+                        bt.logging.info(f"Close to epoch end ({blocks_until_epoch} blocks remaining), attempting submission...")
                         if state['candidate_product'] != state['last_submitted_product']:
                             bt.logging.info("Attempting to submit new candidate...")
                             try:
@@ -298,10 +314,8 @@ async def run_psichic_model_loop(state: Dict[str, Any]) -> None:
                                 bt.logging.error(f"Error submitting response: {e}")
                         else:
                             bt.logging.info("Skipping submission - same product as last submission")
-                    else:
-                        bt.logging.info("Skipping submission - within submission interval")
 
-                await asyncio.sleep(2)  # mild backoff
+                await asyncio.sleep(2)
 
         except Exception as e:
             bt.logging.error(f"Error in PSICHIC model loop: {e}")
@@ -327,7 +341,8 @@ async def submit_response(state: Dict[str, Any]) -> None:
     bt.logging.info(f"Starting submission process for product: {candidate_product}")
     
     # 1) Encrypt the response
-    encrypted_response = state['bdt'].encrypt(state['miner_uid'], candidate_product)
+    current_block = await state['subtensor'].get_current_block()
+    encrypted_response = state['bdt'].encrypt(state['miner_uid'], candidate_product, current_block)
     bt.logging.info(f"Encrypted response generated successfully")
 
     # 2) Create temp file, write content
@@ -440,7 +455,7 @@ async def run_miner(config: argparse.Namespace) -> None:
     next_boundary = last_boundary + epoch_length
 
     # If we start too close to epoch end, wait for next epoch
-    if next_boundary - current_block < 10:
+    if next_boundary - current_block < 20:
         bt.logging.info(f"Too close to epoch end, waiting for next epoch to start...")
         block_to_check = next_boundary
         await asyncio.sleep(12*10)
@@ -450,7 +465,7 @@ async def run_miner(config: argparse.Namespace) -> None:
     block_hash = await subtensor.determine_block_hash(block_to_check)
     startup_proteins = get_challenge_proteins_from_blockhash(
         block_hash=block_hash,
-        num_targets=config.num_targets,
+        weekly_target=config.weekly_target,
         num_antitargets=config.num_antitargets
     )
 
@@ -522,7 +537,7 @@ async def run_miner(config: argparse.Namespace) -> None:
                 
                 new_proteins = get_challenge_proteins_from_blockhash(
                     block_hash=block_hash,
-                    num_targets=config.num_targets,
+                    weekly_target=config.weekly_target,
                     num_antitargets=config.num_antitargets
                 )
                 if (new_proteins and 
