@@ -55,7 +55,7 @@ def main():
     weights[args.target_uid] = 1.0
 
     # 3) Send the weights to the chain with retry logic
-    max_retries = 20
+    max_retries = 10
     delay_between_retries = 12  # seconds
     for attempt in range(max_retries):
         try:
@@ -68,9 +68,17 @@ def main():
                 wait_for_inclusion=True
             )
             print(f"Result from set_weights: {result}")
-            break  # Exit loop if successful
+
+            # Only break if result indicates success (result[0] == True).
+            if result[0] is True:
+                print("Weights set successfully. Exiting retry loop.")
+                break
+            else:
+                print("set_weights returned a non-success response. Will retry if attempts remain.")
+
         except Exception as e:
             print(f"Error setting weights: {e}")
+
             if attempt < max_retries - 1:
                 print(f"Retrying in {delay_between_retries} seconds...")
                 time.sleep(delay_between_retries)
