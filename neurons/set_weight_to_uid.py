@@ -55,7 +55,7 @@ def main():
     weights[args.target_uid] = 1.0
 
     # 3) Send the weights to the chain with retry logic
-    max_retries = 3
+    max_retries = 20
     delay_between_retries = 12  # seconds
     for attempt in range(max_retries):
         try:
