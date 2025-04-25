@@ -61,7 +61,7 @@ class AbstractBittensorDrandTimelock:
     """Class for Drand-based timelock encryption and decryption using the timelock library."""
     #DRAND_URL: str = "https://api.drand.sh"  # more 500 than 200
     DRAND_URL: str = "https://drand.cloudflare.com"
-    EPOCH_LENGTH = 360  # Number of blocks per epoch
+    EPOCH_LENGTH = 361  # Number of blocks per epoch
 
     def __init__(self) -> None:
         """Initialize the Timelock client."""
