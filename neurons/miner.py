@@ -158,7 +158,8 @@ async def setup_bittensor_objects(config: argparse.Namespace) -> Tuple[Any, Any,
 
             # Query epoch length
             node = SubstrateInterface(url=config.network)
-            epoch_length = node.query("SubtensorModule", "Tempo", [config.netuid]).value
+            # Set epoch_length to tempo + 1
+            epoch_length = node.query("SubtensorModule", "Tempo", [config.netuid]).value + 1
             bt.logging.info(f"Epoch length query successful: {epoch_length} blocks")
 
         return wallet, subtensor, metagraph, miner_uid, epoch_length

@@ -45,7 +45,7 @@ def get_config():
     config.netuid = 68
     config.network = os.environ.get("SUBTENSOR_NETWORK")
     node = SubstrateInterface(url=config.network)
-    config.epoch_length = node.query("SubtensorModule", "Tempo", [config.netuid]).value
+    config.epoch_length = node.query("SubtensorModule", "Tempo", [config.netuid]).value + 1
 
     # Load configuration options
     config.update(load_config())
@@ -577,7 +577,7 @@ async def main(config):
             bt.logging.debug(f'Found {metagraph.n} nodes in network')
             current_block = await subtensor.get_current_block()
 
-            # Check if the current block marks the end of an epoch (using a 360-block interval).
+            # Check if the current block marks the end of an epoch.
             if current_block % config.epoch_length == 0:
 
                 try:
@@ -698,7 +698,7 @@ async def main(config):
                 await subtensor.initialize()
                 bt.logging.info("Validator reset subtensor connection.")
                 await asyncio.sleep(12) # Sleep for 1 block to avoid unncessary re-connection
-                
+            
             else:
                 bt.logging.info(f"Waiting for epoch to end... {config.epoch_length - (current_block % config.epoch_length)} blocks remaining.")
                 await asyncio.sleep(1)
