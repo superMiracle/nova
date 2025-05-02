@@ -10,7 +10,8 @@ from rdkit.Chem import MACCSkeys
 import numpy as np
 import math
 import pandas as pd
-from huggingface_hub import hf_hub_download
+from huggingface_hub import hf_hub_download, hf_hub_url, get_hf_file_metadata
+import time
 
 load_dotenv(override=True)
 
@@ -247,30 +248,42 @@ def molecule_unique_for_protein_hf(protein: str, molecule: str) -> bool:
     Check if molecule exists in Hugging Face Submission-Archive dataset.
     Returns True if unique (not found), False if found.
     """
-    if not hasattr(molecule_unique_for_protein_hf, "current_protein"):
-        molecule_unique_for_protein_hf.current_protein = None
-        molecule_unique_for_protein_hf.molecule_set = set()
+    if not hasattr(molecule_unique_for_protein_hf, "_CACHE"):
+        molecule_unique_for_protein_hf._CACHE = (None, None, None)  
     
     try:
-        if molecule_unique_for_protein_hf.current_protein != protein:
-            filename = f"{protein}_molecules.csv"
+        cached_protein, cached_sha, molecules_set = molecule_unique_for_protein_hf._CACHE
+        
+        if protein != cached_protein:
+            bt.logging.debug(f"Switching from protein {cached_protein} to {protein}")
+            cached_sha = None 
+        
+        filename = f"{protein}_molecules.csv"
+        
+        url = hf_hub_url(
+            repo_id="Metanova/Submission-Archive",
+            filename=filename,
+            repo_type="dataset"
+        )
+
+        metadata = get_hf_file_metadata(url)
+        current_sha = metadata.commit_hash
+        
+        if cached_sha != current_sha:
             file_path = hf_hub_download(
                 repo_id="Metanova/Submission-Archive",
                 filename=filename,
-                repo_type="dataset"
+                repo_type="dataset",
+                revision=current_sha
             )
             
-            df = pd.read_csv(file_path)
-            if 'Molecule_ID' in df.columns:
-                molecule_unique_for_protein_hf.molecule_set = set(df['Molecule_ID'].values)
-                bt.logging.debug(f"Loaded {len(molecule_unique_for_protein_hf.molecule_set)} molecules for {protein}")
-            else:
-                bt.logging.warning(f"CSV for {protein} doesn't have a Molecule_ID column")
-                molecule_unique_for_protein_hf.molecule_set = set()
+            df = pd.read_csv(file_path, usecols=["Molecule_ID"])
+            molecules_set = set(df["Molecule_ID"])
+            bt.logging.debug(f"Loaded {len(molecules_set)} molecules into lookup set for {protein} (commit {current_sha[:7]})")
             
-            molecule_unique_for_protein_hf.current_protein = protein
+            molecule_unique_for_protein_hf._CACHE = (protein, current_sha, molecules_set)
         
-        return molecule not in molecule_unique_for_protein_hf.molecule_set
+        return molecule not in molecules_set
         
     except Exception as e:
         # Assume molecule is unique if there's an error
