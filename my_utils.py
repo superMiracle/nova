@@ -224,7 +224,7 @@ def molecule_unique_for_protein(protein: str, molecule: str) -> bool:
         bool: True if the molecule is unique (not seen before for this protein),
               False if the molecule has been previously submitted
     """
-    api_key = os.environ.get("VALIDATOR_API_KEY", "239e92dn9823nd203h8")
+    api_key = os.environ.get("VALIDATOR_API_KEY")
     if not api_key:
         raise ValueError("validator_api_key environment variable not set.")
     
