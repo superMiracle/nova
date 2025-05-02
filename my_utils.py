@@ -214,7 +214,7 @@ def compute_maccs_entropy(smiles_list: list[str]) -> float:
 
     return avg_entropy
 
-def molecule_unique_for_protein(protein: str, molecule: str) -> bool:
+def molecule_unique_for_protein_api(protein: str, molecule: str) -> bool:
     """
     Check if a molecule has been previously submitted for the same target protein in any competition.
     
@@ -250,7 +250,7 @@ def molecule_unique_for_protein(protein: str, molecule: str) -> bool:
         bt.logging.error(f"Error checking molecule uniqueness: {e}")
         return True
 
-def molecule_unique_from_hf(protein: str, molecule: str) -> bool:
+def molecule_unique_for_protein_hf(protein: str, molecule: str) -> bool:
     """
     Check if molecule exists in Hugging Face Submission-Archive dataset.
     Returns True if unique (not found), False if found.
