@@ -24,7 +24,7 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(BASE_DIR)
 
 from config.config_loader import load_config
-from my_utils import get_smiles, get_sequence_from_protein_code, get_heavy_atom_count, get_challenge_proteins_from_blockhash, compute_maccs_entropy, molecule_unique_for_protein
+from my_utils import get_smiles, get_sequence_from_protein_code, get_heavy_atom_count, get_challenge_proteins_from_blockhash, compute_maccs_entropy, molecule_unique_for_protein_hf
 from PSICHIC.wrapper import PsichicWrapper
 from btdr import QuicknetBittensorDrandTimelock
 
@@ -296,7 +296,7 @@ def validate_molecules_and_calculate_entropy(
                     break
                 
                 # Check if the molecule is unique for the target protein (weekly_target)
-                if not molecule_unique_for_protein(config.weekly_target, molecule):
+                if not molecule_unique_for_protein_hf(config.weekly_target, molecule):
                     bt.logging.warning(f"UID={uid}, molecule='{molecule}' is not unique for protein '{config.weekly_target}'")
                     valid_smiles = []
                     valid_names = []
