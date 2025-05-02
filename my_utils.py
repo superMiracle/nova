@@ -211,3 +211,39 @@ def compute_maccs_entropy(smiles_list: list[str]) -> float:
     avg_entropy = np.mean(entropy_per_bit)
 
     return avg_entropy
+
+def molecule_unique_for_protein(protein: str, molecule: str) -> bool:
+    """
+    Check if a molecule has been previously submitted for the same target protein in any competition.
+    
+    Parameters:
+        protein (str): The target protein code to check against
+        molecule (str): The molecule ID to check
+        
+    Returns:
+        bool: True if the molecule is unique (not seen before for this protein),
+              False if the molecule has been previously submitted
+    """
+    api_key = os.environ.get("VALIDATOR_API_KEY", "239e92dn9823nd203h8")
+    if not api_key:
+        raise ValueError("validator_api_key environment variable not set.")
+    
+    url = f"https://dashboard-backend-multitarget.up.railway.app/api/molecule_seen/{molecule}/{protein}"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}"
+    }
+    
+    try:
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code != 200:
+            bt.logging.error(f"Failed to check molecule uniqueness: {response.status_code} {response.text}")
+            return True
+            
+        data = response.json()
+        return not data.get("seen", False)
+        
+    except Exception as e:
+        bt.logging.error(f"Error checking molecule uniqueness: {e}")
+        return True
