@@ -217,14 +217,6 @@ def compute_maccs_entropy(smiles_list: list[str]) -> float:
 def molecule_unique_for_protein_api(protein: str, molecule: str) -> bool:
     """
     Check if a molecule has been previously submitted for the same target protein in any competition.
-    
-    Parameters:
-        protein (str): The target protein code to check against
-        molecule (str): The molecule ID to check
-        
-    Returns:
-        bool: True if the molecule is unique (not seen before for this protein),
-              False if the molecule has been previously submitted
     """
     api_key = os.environ.get("VALIDATOR_API_KEY")
     if not api_key:
@@ -255,21 +247,32 @@ def molecule_unique_for_protein_hf(protein: str, molecule: str) -> bool:
     Check if molecule exists in Hugging Face Submission-Archive dataset.
     Returns True if unique (not found), False if found.
     """
+    if not hasattr(molecule_unique_for_protein_hf, "current_protein"):
+        molecule_unique_for_protein_hf.current_protein = None
+        molecule_unique_for_protein_hf.molecule_set = set()
+    
     try:
-        filename = f"{protein}_molecules.csv"
-        file_path = hf_hub_download(
-            repo_id="Metanova/Submission-Archive",
-            filename=filename,
-            repo_type="dataset"
-        )
+        if molecule_unique_for_protein_hf.current_protein != protein:
+            filename = f"{protein}_molecules.csv"
+            file_path = hf_hub_download(
+                repo_id="Metanova/Submission-Archive",
+                filename=filename,
+                repo_type="dataset"
+            )
+            
+            df = pd.read_csv(file_path)
+            if 'Molecule_ID' in df.columns:
+                molecule_unique_for_protein_hf.molecule_set = set(df['Molecule_ID'].values)
+                bt.logging.debug(f"Loaded {len(molecule_unique_for_protein_hf.molecule_set)} molecules for {protein}")
+            else:
+                bt.logging.warning(f"CSV for {protein} doesn't have a Molecule_ID column")
+                molecule_unique_for_protein_hf.molecule_set = set()
+            
+            molecule_unique_for_protein_hf.current_protein = protein
         
-        # Read CSV and check if molecule exists
-        df = pd.read_csv(file_path)
-        unique = molecule not in df['Molecule_ID'].values
+        return molecule not in molecule_unique_for_protein_hf.molecule_set
         
-        return unique
     except Exception as e:
         # Assume molecule is unique if there's an error
         bt.logging.warning(f"Error checking molecule in HF dataset: {e}")
         return True
-    
