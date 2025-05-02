@@ -9,6 +9,8 @@ from rdkit import Chem
 from rdkit.Chem import MACCSkeys
 import numpy as np
 import math
+import pandas as pd
+from huggingface_hub import hf_hub_download
 
 load_dotenv(override=True)
 
@@ -247,3 +249,27 @@ def molecule_unique_for_protein(protein: str, molecule: str) -> bool:
     except Exception as e:
         bt.logging.error(f"Error checking molecule uniqueness: {e}")
         return True
+
+def molecule_unique_from_hf(protein: str, molecule: str) -> bool:
+    """
+    Check if molecule exists in Hugging Face Submission-Archive dataset.
+    Returns True if unique (not found), False if found.
+    """
+    try:
+        filename = f"{protein}_molecules.csv"
+        file_path = hf_hub_download(
+            repo_id="Metanova/Submission-Archive",
+            filename=filename,
+            repo_type="dataset"
+        )
+        
+        # Read CSV and check if molecule exists
+        df = pd.read_csv(file_path)
+        unique = molecule not in df['Molecule_ID'].values
+        
+        return unique
+    except Exception as e:
+        # Assume molecule is unique if there's an error
+        bt.logging.warning(f"Error checking molecule in HF dataset: {e}")
+        return True
+    
