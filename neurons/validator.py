@@ -368,7 +368,7 @@ def score_protein_for_all_uids(
         bt.logging.info('Model initialized successfully.')
     except Exception as e:
         try:
-            os.system(f"wget -O {os.path.join(BASE_DIR, 'PSICHIC/trained_weights/PDBv2020_PSICHIC/model.pt')} https://huggingface.co/Metanova/PSICHIC/resolve/main/model.pt")
+            os.system(f"wget -O {os.path.join(BASE_DIR, 'PSICHIC/trained_weights/TREAT1/model.pt')} https://huggingface.co/Metanova/TREAT-1/resolve/main/model.pt")
             psichic.run_challenge_start(protein_sequence)
             bt.logging.info('Model initialized successfully.')
         except Exception as e:
@@ -590,7 +590,7 @@ async def main(config):
             current_block = await subtensor.get_current_block()
 
             # Check if the current block marks the end of an epoch.
-            if current_block % config.epoch_length == 0:
+            if current_block % config.epoch_length != 0:
 
                 try:
                     start_block = current_block - config.epoch_length
@@ -691,11 +691,11 @@ async def main(config):
                         ]
                         bt.logging.info(f"Calling: {' '.join(cmd)}")
                     
-                        proc = subprocess.run(cmd, capture_output=True, text=True)
-                        bt.logging.info(f"Output from set_weight_to_uid:\n{proc.stdout}")
-                        bt.logging.info(f"Errors from set_weight_to_uid:\n{proc.stderr}")
-                        if proc.returncode != 0:
-                            bt.logging.error(f"Script returned non-zero exit code: {proc.returncode}")
+                        #proc = subprocess.run(cmd, capture_output=True, text=True)
+                        #bt.logging.info(f"Output from set_weight_to_uid:\n{proc.stdout}")
+                        #bt.logging.info(f"Errors from set_weight_to_uid:\n{proc.stderr}")
+                        #if proc.returncode != 0:
+                        #    bt.logging.error(f"Script returned non-zero exit code: {proc.returncode}")
 
                     except Exception as e:
                         bt.logging.error(f"Error calling set_weight_to_uid script: {e}")

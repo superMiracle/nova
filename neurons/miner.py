@@ -495,8 +495,8 @@ async def run_miner(config: argparse.Namespace) -> None:
         except Exception as e:
             try:
                 os.system(
-                    f"wget -O {os.path.join(BASE_DIR, 'PSICHIC/trained_weights/PDBv2020_PSICHIC/model.pt')} "
-                    f"https://huggingface.co/Metanova/PSICHIC/resolve/main/model.pt"
+                    f"wget -O {os.path.join(BASE_DIR, 'PSICHIC/trained_weights/TREAT1/model.pt')} "
+                    f"https://huggingface.co/Metanova/TREAT-1/resolve/main/model.pt"
                 )
                 # Retry initialization after download
                 for target_protein in state['current_challenge_targets']:
@@ -583,8 +583,8 @@ async def run_miner(config: argparse.Namespace) -> None:
                 except Exception as e:
                     try:
                         os.system(
-                            f"wget -O {os.path.join(BASE_DIR, 'PSICHIC/trained_weights/PDBv2020_PSICHIC/model.pt')} "
-                            f"https://huggingface.co/Metanova/PSICHIC/resolve/main/model.pt"
+                            f"wget -O {os.path.join(BASE_DIR, 'PSICHIC/trained_weights/TREAT1/model.pt')} "
+                            f"https://huggingface.co/Metanova/TREAT-1/resolve/main/model.pt"
                         )
                         # Retry initialization after download
                         for target_protein in state['current_challenge_targets']:
