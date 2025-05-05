@@ -464,10 +464,15 @@ def calculate_final_scores(
             combined_molecule_scores.append(mol_score)
 
             # Calculate molecule repetition penalty
-            if mol_score > config['molecule_repetition_threshold']:
-                mol_score = mol_score / (config['molecule_repetition_weight'] * molecule_name_counts[data['names'][mol_idx]])
-            else:
-                mol_score = mol_score * config['molecule_repetition_weight'] * molecule_name_counts[data['names'][mol_idx]]
+            if config['molecule_repetition_weight'] != 0:
+                if mol_score > config['molecule_repetition_threshold']:
+                    denominator = config['molecule_repetition_weight'] * molecule_name_counts[data['names'][mol_idx]]
+                    if denominator == 0:
+                        mol_score = mol_score  
+                    else:
+                        mol_score = mol_score / denominator
+                else:
+                    mol_score = mol_score * config['molecule_repetition_weight'] * molecule_name_counts[data['names'][mol_idx]]
             
             molecule_scores_after_repetition.append(mol_score)
         
