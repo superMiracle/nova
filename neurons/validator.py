@@ -24,7 +24,7 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(BASE_DIR)
 
 from config.config_loader import load_config
-from my_utils import get_smiles, get_sequence_from_protein_code, get_heavy_atom_count, get_challenge_proteins_from_blockhash, compute_maccs_entropy
+from my_utils import get_smiles, get_sequence_from_protein_code, get_heavy_atom_count, get_challenge_proteins_from_blockhash, compute_maccs_entropy, molecule_unique_for_protein_hf
 from PSICHIC.wrapper import PsichicWrapper
 from btdr import QuicknetBittensorDrandTimelock
 
@@ -276,7 +276,7 @@ def validate_molecules_and_calculate_entropy(
                     break
                 
                 if get_heavy_atom_count(smiles) < config['min_heavy_atoms']:
-                    bt.logging.error(f"UID={uid}, molecule='{molecule}' has insufficient heavy atoms")
+                    bt.logging.warnning(f"UID={uid}, molecule='{molecule}' has insufficient heavy atoms")
                     valid_smiles = []
                     valid_names = []
                     break
@@ -285,7 +285,7 @@ def validate_molecules_and_calculate_entropy(
                     mol = Chem.MolFromSmiles(smiles)
                     num_rotatable_bonds = Descriptors.NumRotatableBonds(mol)
                     if num_rotatable_bonds < config['min_rotatable_bonds'] or num_rotatable_bonds > config['max_rotatable_bonds']:
-                        bt.logging.error(f"UID={uid}, molecule='{molecule}' has an invalid number of rotatable bonds")
+                        bt.logging.warning(f"UID={uid}, molecule='{molecule}' has an invalid number of rotatable bonds")
                         valid_smiles = []
                         valid_names = []
                         break
@@ -295,6 +295,13 @@ def validate_molecules_and_calculate_entropy(
                     valid_names = []
                     break
                 
+                # Check if the molecule is unique for the target protein (weekly_target)
+                if not molecule_unique_for_protein_hf(config.weekly_target, molecule):
+                    bt.logging.warning(f"UID={uid}, molecule='{molecule}' is not unique for protein '{config.weekly_target}'")
+                    valid_smiles = []
+                    valid_names = []
+                    break
+     
                 valid_smiles.append(smiles)
                 valid_names.append(molecule)
             except Exception as e:
@@ -361,7 +368,7 @@ def score_protein_for_all_uids(
         bt.logging.info('Model initialized successfully.')
     except Exception as e:
         try:
-            os.system(f"wget -O {os.path.join(BASE_DIR, 'PSICHIC/trained_weights/PDBv2020_PSICHIC/model.pt')} https://huggingface.co/Metanova/PSICHIC/resolve/main/model.pt")
+            os.system(f"wget -O {os.path.join(BASE_DIR, 'PSICHIC/trained_weights/TREAT1/model.pt')} https://huggingface.co/Metanova/TREAT-1/resolve/main/model.pt")
             psichic.run_challenge_start(protein_sequence)
             bt.logging.info('Model initialized successfully.')
         except Exception as e:
@@ -457,10 +464,15 @@ def calculate_final_scores(
             combined_molecule_scores.append(mol_score)
 
             # Calculate molecule repetition penalty
-            if mol_score > config['molecule_repetition_threshold']:
-                mol_score = mol_score / (config['molecule_repetition_weight'] * molecule_name_counts[data['names'][mol_idx]])
-            else:
-                mol_score = mol_score * config['molecule_repetition_weight'] * molecule_name_counts[data['names'][mol_idx]]
+            if config['molecule_repetition_weight'] != 0:
+                if mol_score > config['molecule_repetition_threshold']:
+                    denominator = config['molecule_repetition_weight'] * molecule_name_counts[data['names'][mol_idx]]
+                    if denominator == 0:
+                        mol_score = mol_score  
+                    else:
+                        mol_score = mol_score / denominator
+                else:
+                    mol_score = mol_score * config['molecule_repetition_weight'] * molecule_name_counts[data['names'][mol_idx]]
             
             molecule_scores_after_repetition.append(mol_score)
         

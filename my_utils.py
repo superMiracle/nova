@@ -9,6 +9,9 @@ from rdkit import Chem
 from rdkit.Chem import MACCSkeys
 import numpy as np
 import math
+import pandas as pd
+from huggingface_hub import hf_hub_download, hf_hub_url, get_hf_file_metadata
+import time
 
 load_dotenv(override=True)
 
@@ -211,3 +214,78 @@ def compute_maccs_entropy(smiles_list: list[str]) -> float:
     avg_entropy = np.mean(entropy_per_bit)
 
     return avg_entropy
+
+def molecule_unique_for_protein_api(protein: str, molecule: str) -> bool:
+    """
+    Check if a molecule has been previously submitted for the same target protein in any competition.
+    """
+    api_key = os.environ.get("VALIDATOR_API_KEY")
+    if not api_key:
+        raise ValueError("validator_api_key environment variable not set.")
+    
+    url = f"https://dashboard-backend-multitarget.up.railway.app/api/molecule_seen/{molecule}/{protein}"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}"
+    }
+    
+    try:
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code != 200:
+            bt.logging.error(f"Failed to check molecule uniqueness: {response.status_code} {response.text}")
+            return True
+            
+        data = response.json()
+        return not data.get("seen", False)
+        
+    except Exception as e:
+        bt.logging.error(f"Error checking molecule uniqueness: {e}")
+        return True
+
+def molecule_unique_for_protein_hf(protein: str, molecule: str) -> bool:
+    """
+    Check if molecule exists in Hugging Face Submission-Archive dataset.
+    Returns True if unique (not found), False if found.
+    """
+    if not hasattr(molecule_unique_for_protein_hf, "_CACHE"):
+        molecule_unique_for_protein_hf._CACHE = (None, None, None)  
+    
+    try:
+        cached_protein, cached_sha, molecules_set = molecule_unique_for_protein_hf._CACHE
+        
+        if protein != cached_protein:
+            bt.logging.debug(f"Switching from protein {cached_protein} to {protein}")
+            cached_sha = None 
+        
+        filename = f"{protein}_molecules.csv"
+        
+        url = hf_hub_url(
+            repo_id="Metanova/Submission-Archive",
+            filename=filename,
+            repo_type="dataset"
+        )
+
+        metadata = get_hf_file_metadata(url)
+        current_sha = metadata.commit_hash
+        
+        if cached_sha != current_sha:
+            file_path = hf_hub_download(
+                repo_id="Metanova/Submission-Archive",
+                filename=filename,
+                repo_type="dataset",
+                revision=current_sha
+            )
+            
+            df = pd.read_csv(file_path, usecols=["Molecule_ID"])
+            molecules_set = set(df["Molecule_ID"])
+            bt.logging.debug(f"Loaded {len(molecules_set)} molecules into lookup set for {protein} (commit {current_sha[:7]})")
+            
+            molecule_unique_for_protein_hf._CACHE = (protein, current_sha, molecules_set)
+        
+        return molecule not in molecules_set
+        
+    except Exception as e:
+        # Assume molecule is unique if there's an error
+        bt.logging.warning(f"Error checking molecule in HF dataset: {e}")
+        return True
