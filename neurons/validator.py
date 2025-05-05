@@ -276,7 +276,7 @@ def validate_molecules_and_calculate_entropy(
                     break
                 
                 if get_heavy_atom_count(smiles) < config['min_heavy_atoms']:
-                    bt.logging.warnning(f"UID={uid}, molecule='{molecule}' has insufficient heavy atoms")
+                    bt.logging.warning(f"UID={uid}, molecule='{molecule}' has insufficient heavy atoms")
                     valid_smiles = []
                     valid_names = []
                     break
@@ -486,9 +486,22 @@ def calculate_final_scores(
             score_dict[uid]['final_score'] = score_dict[uid]['final_score'] * (config['entropy_weight'] + entropy)
         
         # Log details
-        bt.logging.info(
-            f"UID={uid} -> final_score={score_dict[uid]['final_score']}, "
-        )
+        # Prepare detailed log info
+        smiles_list = data.get('smiles', [])
+        names_list = data.get('names', [])
+        # Transpose target/antitarget scores to get per-molecule lists
+        target_scores_per_mol = list(map(list, zip(*targets))) if targets and targets[0] else []
+        antitarget_scores_per_mol = list(map(list, zip(*antitargets))) if antitargets and antitargets[0] else []
+        log_lines = [
+            f"UID={uid}",
+            f"  Molecule names: {names_list}",
+            f"  SMILES: {smiles_list}",
+            f"  Target scores per molecule: {target_scores_per_mol}",
+            f"  Antitarget scores per molecule: {antitarget_scores_per_mol}",
+            f"  Entropy: {entropy}",
+            f"  Final score: {score_dict[uid]['final_score']}"
+        ]
+        bt.logging.info("\n".join(log_lines))
 
     return score_dict
 
@@ -547,7 +560,7 @@ def determine_winner(score_dict: dict[int, dict[str, list[list[float]]]]) -> Opt
     
     # If there is only one winner, return it
     if tie_winner and len(tie_winner) == 1:
-        bt.logging.info(f"Winner after tie-break: UID={tie_winner}, winning_score={best_score}, std_dev={lowest_std_dev}")
+        bt.logging.info(f"Winner after tie-break: UID={tie_winner[0]}, winning_score={best_score}, std_dev={lowest_std_dev}")
         return tie_winner[0]
     
     # If there is still a tie, return the uid with the highest molecule score
