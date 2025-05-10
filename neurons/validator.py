@@ -24,7 +24,7 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(BASE_DIR)
 
 from config.config_loader import load_config
-from my_utils import get_smiles, get_sequence_from_protein_code, get_heavy_atom_count, get_challenge_proteins_from_blockhash, compute_maccs_entropy, molecule_unique_for_protein_hf
+from my_utils import get_smiles, get_sequence_from_protein_code, get_heavy_atom_count, get_challenge_proteins_from_blockhash, compute_maccs_entropy, molecule_unique_for_protein_hf, find_chemically_identical
 from PSICHIC.wrapper import PsichicWrapper
 from btdr import QuicknetBittensorDrandTimelock
 
@@ -309,6 +309,24 @@ def validate_molecules_and_calculate_entropy(
                 valid_smiles = []
                 valid_names = []
                 break
+            
+        # Check for chemically identical molecules
+        if valid_smiles:
+            try:
+                identical_molecules = find_chemically_identical(valid_smiles)
+                if identical_molecules:
+                    duplicate_names = []
+                    for inchikey, indices in identical_molecules.items():
+                        molecule_names = [valid_names[idx] for idx in indices]
+                        duplicate_names.append(f"{', '.join(molecule_names)} (same InChIKey: {inchikey})")
+                    
+                    bt.logging.warning(f"UID={uid} submission contains chemically identical molecules: {'; '.join(duplicate_names)}")
+                    score_dict[uid]["entropy"] = None
+                    score_dict[uid]["block_submitted"] = None
+                    continue 
+            except Exception as e:
+                bt.logging.warning(f"Error checking for chemically identical molecules for UID={uid}: {e}")
+
         
         # Calculate entropy if we have valid molecules
         if valid_smiles:

@@ -289,3 +289,24 @@ def molecule_unique_for_protein_hf(protein: str, molecule: str) -> bool:
         # Assume molecule is unique if there's an error
         bt.logging.warning(f"Error checking molecule in HF dataset: {e}")
         return True
+    
+def find_chemically_identical(smiles_list: list[str]) -> dict:
+    """
+    Check for identical molecules in a list of SMILES strings by converting to InChIKeys.
+    """
+    inchikey_to_indices = {}
+    
+    for i, smiles in enumerate(smiles_list):
+        try:
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is not None:
+                inchikey = Chem.MolToInchiKey(mol)
+                if inchikey not in inchikey_to_indices:
+                    inchikey_to_indices[inchikey] = []
+                inchikey_to_indices[inchikey].append(i)
+        except Exception as e:
+            bt.logging.warning(f"Error processing SMILES {smiles}: {e}")
+    
+    duplicates = {k: v for k, v in inchikey_to_indices.items() if len(v) > 1}
+    
+    return duplicates
