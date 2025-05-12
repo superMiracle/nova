@@ -124,7 +124,7 @@ async def get_commitments(subtensor, metagraph, block_hash: str, netuid: int) ->
 
 def tuple_safe_eval(input_str: str) -> tuple:
     # Limit input size to prevent overly large inputs.
-    if len(input_str) > 2048:
+    if len(input_str) > 4096:
         bt.logging.error("Input exceeds allowed size")
         return None
     
@@ -152,7 +152,7 @@ def tuple_safe_eval(input_str: str) -> tuple:
     
     return result
 
-def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "bytes=0-2048"}) -> dict:
+def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "bytes=0-4096"}) -> dict:
     """
     Decrypts submissions from validators by fetching encrypted content from GitHub URLs and decrypting them.
 
@@ -162,7 +162,7 @@ def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "by
             - data: GitHub URL path containing the encrypted submission 
             - Other commitment metadata
         headers (dict, optional): HTTP request headers for fetching content. 
-            Defaults to {"Range": "bytes=0-2048"} to limit response size.
+            Defaults to {"Range": "bytes=0-4096"} to limit response size.
 
     Returns:
         dict: A dictionary of decrypted submissions mapped by validator UIDs.
