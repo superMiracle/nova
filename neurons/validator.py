@@ -19,6 +19,7 @@ import aiohttp
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import Descriptors
+import datetime
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(BASE_DIR)
@@ -566,8 +567,16 @@ def determine_winner(score_dict: dict[int, dict[str, list[list[float]]]]) -> Opt
         bt.logging.info(f"Winner: UID={best_uids[0]}, winning_score={best_score}")
         return best_uids[0]
     
+    def parse_timestamp(uid):
+        ts = score_dict[uid].get('push_time', '')
+        try:
+            return datetime.datetime.fromisoformat(ts)
+        except Exception as e:
+            bt.logging.warning(f"Failed to parse timestamp '{ts}' for UID={uid}: {e}")
+            return datetime.datetime.max.replace(tzinfo=datetime.timezone.utc)
+    
     # Sort by push time first, then uid to ensure deterministic result
-    winner = sorted(best_uids, key=lambda uid: (score_dict[uid].get('push_time', '') or 'z', uid))[0]
+    winner = sorted(best_uids, key=lambda uid: (parse_timestamp(uid), uid))[0]
     
     push_time = score_dict[winner].get('push_time', '')
     if push_time:
