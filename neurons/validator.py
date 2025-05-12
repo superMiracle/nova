@@ -19,12 +19,13 @@ import aiohttp
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import Descriptors
+import datetime
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(BASE_DIR)
 
 from config.config_loader import load_config
-from my_utils import get_smiles, get_sequence_from_protein_code, get_heavy_atom_count, get_challenge_proteins_from_blockhash, compute_maccs_entropy, molecule_unique_for_protein_hf
+from my_utils import get_smiles, get_sequence_from_protein_code, get_heavy_atom_count, get_challenge_proteins_from_blockhash, compute_maccs_entropy, molecule_unique_for_protein_hf, find_chemically_identical
 from PSICHIC.wrapper import PsichicWrapper
 from btdr import QuicknetBittensorDrandTimelock
 
@@ -123,7 +124,7 @@ async def get_commitments(subtensor, metagraph, block_hash: str, netuid: int) ->
 
 def tuple_safe_eval(input_str: str) -> tuple:
     # Limit input size to prevent overly large inputs.
-    if len(input_str) > 2048:
+    if len(input_str) > 4096:
         bt.logging.error("Input exceeds allowed size")
         return None
     
@@ -151,7 +152,7 @@ def tuple_safe_eval(input_str: str) -> tuple:
     
     return result
 
-def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "bytes=0-2048"}) -> dict:
+def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "bytes=0-4096"}) -> dict:
     """
     Decrypts submissions from validators by fetching encrypted content from GitHub URLs and decrypting them.
 
@@ -161,7 +162,7 @@ def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "by
             - data: GitHub URL path containing the encrypted submission 
             - Other commitment metadata
         headers (dict, optional): HTTP request headers for fetching content. 
-            Defaults to {"Range": "bytes=0-2048"} to limit response size.
+            Defaults to {"Range": "bytes=0-4096"} to limit response size.
 
     Returns:
         dict: A dictionary of decrypted submissions mapped by validator UIDs.
@@ -174,6 +175,7 @@ def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "by
         - Implements retry logic with exponential backoff for GitHub requests
     """
     encrypted_submissions = {}
+    push_timestamps = {}
     max_retries = 3
     base_delay = 1  # seconds
 
@@ -201,6 +203,18 @@ def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "by
                             break
 
                         encrypted_submissions[commit.uid] = (encrypted_content[0], encrypted_content[1])
+                        
+                        try:
+                            repo_parts = commit.data.split('/')[:2]
+                            if len(repo_parts) >= 2:
+                                repo_url = f"https://api.github.com/repos/{repo_parts[0]}/{repo_parts[1]}"
+                                repo_resp = requests.get(repo_url)
+                                if repo_resp.status_code == 200:
+                                    repo_data = repo_resp.json()
+                                    push_timestamps[commit.uid] = repo_data.get('pushed_at', '')
+                        except Exception as e:
+                            bt.logging.warning(f"Error getting repo push time for UID {commit.uid}: {e}")
+                            
                         break  # Success, exit retry loop
                     else:
                         retry_count += 1
@@ -233,8 +247,8 @@ def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "by
         decrypted_submissions = {}
 
     bt.logging.info(f"Decrypted submissions: {len(decrypted_submissions)}")
-            
-    return decrypted_submissions
+    
+    return decrypted_submissions, push_timestamps
 
 def validate_molecules_and_calculate_entropy(
     uid_to_data: dict[int, dict[str, list]],
@@ -309,6 +323,24 @@ def validate_molecules_and_calculate_entropy(
                 valid_smiles = []
                 valid_names = []
                 break
+            
+        # Check for chemically identical molecules
+        if valid_smiles:
+            try:
+                identical_molecules = find_chemically_identical(valid_smiles)
+                if identical_molecules:
+                    duplicate_names = []
+                    for inchikey, indices in identical_molecules.items():
+                        molecule_names = [valid_names[idx] for idx in indices]
+                        duplicate_names.append(f"{', '.join(molecule_names)} (same InChIKey: {inchikey})")
+                    
+                    bt.logging.warning(f"UID={uid} submission contains chemically identical molecules: {'; '.join(duplicate_names)}")
+                    score_dict[uid]["entropy"] = None
+                    score_dict[uid]["block_submitted"] = None
+                    continue 
+            except Exception as e:
+                bt.logging.warning(f"Error checking for chemically identical molecules for UID={uid}: {e}")
+
         
         # Calculate entropy if we have valid molecules
         if valid_smiles:
@@ -508,13 +540,7 @@ def calculate_final_scores(
 def determine_winner(score_dict: dict[int, dict[str, list[list[float]]]]) -> Optional[int]:
     """
     Determines the winning UID based on final score.
-    In case of a tie, the UID with the lowest standard deviation of combined molecule scores wins.
-    
-    Args:
-        score_dict: Dictionary mapping UIDs to their scoring data
-        
-    Returns:
-        The winning UID or None if no valid scores are found
+    In case of ties, earliest submission time is used as the tiebreaker.
     """
     best_score = -math.inf
     best_uids = []
@@ -541,39 +567,48 @@ def determine_winner(score_dict: dict[int, dict[str, list[list[float]]]]) -> Opt
         bt.logging.info(f"Winner: UID={best_uids[0]}, winning_score={best_score}")
         return best_uids[0]
     
-    # Break ties using standard deviation of combined molecule scores
-    lowest_std_dev = math.inf
-    tie_winner = []
+    def parse_timestamp(uid):
+        ts = score_dict[uid].get('push_time', '')
+        try:
+            return datetime.datetime.fromisoformat(ts)
+        except Exception as e:
+            bt.logging.warning(f"Failed to parse timestamp '{ts}' for UID={uid}: {e}")
+            return datetime.datetime.max.replace(tzinfo=datetime.timezone.utc)
     
-    for uid in best_uids:
-        if 'combined_molecule_scores' in score_dict[uid]:
-            # Calculate standard deviation, unless there are invalid scores
-            if -math.inf not in score_dict[uid]['combined_molecule_scores']:
-                scores = np.array([s for s in score_dict[uid]['combined_molecule_scores']])
-                std_dev = np.std(scores)
-                
-                if std_dev < lowest_std_dev:
-                    lowest_std_dev = std_dev
-                    tie_winner = [uid]
-                elif std_dev == lowest_std_dev:
-                    tie_winner.append(uid)
+    # Sort by block number first, then push time, then uid to ensure deterministic result
+    winner = sorted(best_uids, key=lambda uid: (
+        score_dict[uid].get('block_submitted', float('inf')), 
+        parse_timestamp(uid), 
+        uid
+    ))[0]
     
-    # If there is only one winner, return it
-    if tie_winner and len(tie_winner) == 1:
-        bt.logging.info(f"Winner after tie-break: UID={tie_winner[0]}, winning_score={best_score}, std_dev={lowest_std_dev}")
-        return tie_winner[0]
+
+    block_num = score_dict[winner].get('block_submitted')
+    push_time = score_dict[winner].get('push_time', '')
     
-    # If there is still a tie, return the uid with the highest molecule score
-    else:
-        highest_molecule_score = -math.inf
-        winner = None
-        for uid in tie_winner:
-            if score_dict[uid]['molecule_scores_after_repetition'] is not None:
-                if max(score_dict[uid]['molecule_scores_after_repetition']) > highest_molecule_score:
-                    highest_molecule_score = max(score_dict[uid]['molecule_scores_after_repetition'])
-                    winner = uid
-        bt.logging.info(f"Winner after secondary tie-break: UID={winner}, winning_score={highest_molecule_score}")
-        return winner
+    tiebreaker_message = f"Tiebreaker winner: UID={winner}, score={best_score}"
+    if block_num:
+        tiebreaker_message += f", block={block_num}"
+    if push_time:
+        tiebreaker_message += f", push_time={push_time}"
+        
+    bt.logging.info(tiebreaker_message)
+        
+    return winner
+
+def download_latest_config(github_raw_url: str, local_path: str = os.path.join(BASE_DIR, "config/config.yaml")):
+    """
+    Downloads the latest config.yaml from the specified GitHub raw URL and saves it locally.
+    """
+    try:
+        response = requests.get(github_raw_url)
+        if response.status_code == 200:
+            with open(local_path, "w", encoding="utf-8") as f:
+                f.write(response.text)
+        else:
+            bt.logging.warning(f"Failed to download config.yaml from GitHub: {response.status_code}")
+    except Exception as e:
+        bt.logging.warning(f"Exception while downloading config.yaml: {e}")
 
 async def main(config):
     """
@@ -595,6 +630,9 @@ async def main(config):
     # Check if the hotkey is registered and has at least 1000 stake.
     await check_registration(wallet, subtensor, config.netuid)
 
+    # Set your GitHub raw config.yaml URL here:
+    GITHUB_RAW_CONFIG_URL = "https://raw.githubusercontent.com/metanova-labs/nova/main/config/config.yaml"  
+
     while True:
         try:
             # Fetch the current metagraph for the given subnet (netuid 68).
@@ -604,6 +642,11 @@ async def main(config):
 
             # Check if the current block marks the end of an epoch.
             if current_block % config.epoch_length == 0:
+
+                # --- Download and reload config.yaml from GitHub ---
+                download_latest_config(GITHUB_RAW_CONFIG_URL)
+                config.update(load_config())
+                # ---------------------------------------------------
 
                 try:
                     start_block = current_block - config.epoch_length
@@ -629,7 +672,7 @@ async def main(config):
                 bt.logging.debug(f"Current commitments: {len(list(current_commitments.values()))}")
 
                 # Decrypt submissions
-                decrypted_submissions = decrypt_submissions(current_commitments)
+                decrypted_submissions, push_timestamps = decrypt_submissions(current_commitments)
 
                 uid_to_data = {}
                 for hotkey, commit in current_commitments.items():
@@ -640,7 +683,8 @@ async def main(config):
                         if molecules is not None:
                             uid_to_data[uid] = {
                                 "molecules": molecules,
-                                "block_submitted": commit.block
+                                "block_submitted": commit.block,
+                                "push_time": push_timestamps.get(uid, '')
                             }
                         else:
                             bt.logging.error(f"No decrypted submission found for UID: {uid}")
@@ -655,7 +699,8 @@ async def main(config):
                         "target_scores": [[] for _ in range(len(target_proteins))],
                         "antitarget_scores": [[] for _ in range(len(antitarget_proteins))],
                         "entropy": None,
-                        "block_submitted": None
+                        "block_submitted": None,
+                        "push_time": uid_to_data[uid].get("push_time", '')
                     }
                     for uid in uid_to_data
                 }

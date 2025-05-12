@@ -1,6 +1,6 @@
 # Number of targets and antitargets to select
 protein_selection:
-  weekly_target: "Q01959"
+  weekly_target: "P31645"
   num_antitargets: 4  
 
 # Parameters for validating and scoring molecules
@@ -18,7 +18,7 @@ molecule_validation:
   min_rotatable_bonds: 1
   max_rotatable_bonds: 10
   # Number of molecules to validate
-  num_molecules: 10
+  num_molecules: 20
 
 # Competition parameters
 competition:
