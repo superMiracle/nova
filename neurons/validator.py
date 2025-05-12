@@ -540,7 +540,7 @@ def calculate_final_scores(
 def determine_winner(score_dict: dict[int, dict[str, list[list[float]]]]) -> Optional[int]:
     """
     Determines the winning UID based on final score.
-    In case of ties, the earliest GitHub push time is used as a tiebreaker.
+    In case of ties, earliest submission time is used as the tiebreaker.
     """
     best_score = -math.inf
     best_uids = []
@@ -575,14 +575,24 @@ def determine_winner(score_dict: dict[int, dict[str, list[list[float]]]]) -> Opt
             bt.logging.warning(f"Failed to parse timestamp '{ts}' for UID={uid}: {e}")
             return datetime.datetime.max.replace(tzinfo=datetime.timezone.utc)
     
-    # Sort by push time first, then uid to ensure deterministic result
-    winner = sorted(best_uids, key=lambda uid: (parse_timestamp(uid), uid))[0]
+    # Sort by block number first, then push time, then uid to ensure deterministic result
+    winner = sorted(best_uids, key=lambda uid: (
+        score_dict[uid].get('block_submitted', float('inf')), 
+        parse_timestamp(uid), 
+        uid
+    ))[0]
     
+
+    block_num = score_dict[winner].get('block_submitted')
     push_time = score_dict[winner].get('push_time', '')
+    
+    tiebreaker_message = f"Tiebreaker winner: UID={winner}, score={best_score}"
+    if block_num:
+        tiebreaker_message += f", block={block_num}"
     if push_time:
-        bt.logging.info(f"Tiebreaker winner: UID={winner}, push_time={push_time}")
-    else:
-        bt.logging.info(f"Tiebreaker winner: UID={winner}")
+        tiebreaker_message += f", push_time={push_time}"
+        
+    bt.logging.info(tiebreaker_message)
         
     return winner
 
