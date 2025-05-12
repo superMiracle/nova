@@ -174,6 +174,7 @@ def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "by
         - Implements retry logic with exponential backoff for GitHub requests
     """
     encrypted_submissions = {}
+    push_timestamps = {}
     max_retries = 3
     base_delay = 1  # seconds
 
@@ -201,6 +202,18 @@ def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "by
                             break
 
                         encrypted_submissions[commit.uid] = (encrypted_content[0], encrypted_content[1])
+                        
+                        try:
+                            repo_parts = commit.data.split('/')[:2]
+                            if len(repo_parts) >= 2:
+                                repo_url = f"https://api.github.com/repos/{repo_parts[0]}/{repo_parts[1]}"
+                                repo_resp = requests.get(repo_url)
+                                if repo_resp.status_code == 200:
+                                    repo_data = repo_resp.json()
+                                    push_timestamps[commit.uid] = repo_data.get('pushed_at', '')
+                        except Exception as e:
+                            bt.logging.warning(f"Error getting repo push time for UID {commit.uid}: {e}")
+                            
                         break  # Success, exit retry loop
                     else:
                         retry_count += 1
@@ -233,8 +246,8 @@ def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "by
         decrypted_submissions = {}
 
     bt.logging.info(f"Decrypted submissions: {len(decrypted_submissions)}")
-            
-    return decrypted_submissions
+    
+    return decrypted_submissions, push_timestamps
 
 def validate_molecules_and_calculate_entropy(
     uid_to_data: dict[int, dict[str, list]],
@@ -526,13 +539,7 @@ def calculate_final_scores(
 def determine_winner(score_dict: dict[int, dict[str, list[list[float]]]]) -> Optional[int]:
     """
     Determines the winning UID based on final score.
-    In case of a tie, the UID with the lowest standard deviation of combined molecule scores wins.
-    
-    Args:
-        score_dict: Dictionary mapping UIDs to their scoring data
-        
-    Returns:
-        The winning UID or None if no valid scores are found
+    In case of ties, the earliest GitHub push time is used as a tiebreaker.
     """
     best_score = -math.inf
     best_uids = []
@@ -559,39 +566,16 @@ def determine_winner(score_dict: dict[int, dict[str, list[list[float]]]]) -> Opt
         bt.logging.info(f"Winner: UID={best_uids[0]}, winning_score={best_score}")
         return best_uids[0]
     
-    # Break ties using standard deviation of combined molecule scores
-    lowest_std_dev = math.inf
-    tie_winner = []
+    # Sort by push time first, then uid to ensure deterministic result
+    winner = sorted(best_uids, key=lambda uid: (score_dict[uid].get('push_time', '') or 'z', uid))[0]
     
-    for uid in best_uids:
-        if 'combined_molecule_scores' in score_dict[uid]:
-            # Calculate standard deviation, unless there are invalid scores
-            if -math.inf not in score_dict[uid]['combined_molecule_scores']:
-                scores = np.array([s for s in score_dict[uid]['combined_molecule_scores']])
-                std_dev = np.std(scores)
-                
-                if std_dev < lowest_std_dev:
-                    lowest_std_dev = std_dev
-                    tie_winner = [uid]
-                elif std_dev == lowest_std_dev:
-                    tie_winner.append(uid)
-    
-    # If there is only one winner, return it
-    if tie_winner and len(tie_winner) == 1:
-        bt.logging.info(f"Winner after tie-break: UID={tie_winner[0]}, winning_score={best_score}, std_dev={lowest_std_dev}")
-        return tie_winner[0]
-    
-    # If there is still a tie, return the uid with the highest molecule score
+    push_time = score_dict[winner].get('push_time', '')
+    if push_time:
+        bt.logging.info(f"Tiebreaker winner: UID={winner}, push_time={push_time}")
     else:
-        highest_molecule_score = -math.inf
-        winner = None
-        for uid in tie_winner:
-            if score_dict[uid]['molecule_scores_after_repetition'] is not None:
-                if max(score_dict[uid]['molecule_scores_after_repetition']) > highest_molecule_score:
-                    highest_molecule_score = max(score_dict[uid]['molecule_scores_after_repetition'])
-                    winner = uid
-        bt.logging.info(f"Winner after secondary tie-break: UID={winner}, winning_score={highest_molecule_score}")
-        return winner
+        bt.logging.info(f"Tiebreaker winner: UID={winner}")
+        
+    return winner
 
 async def main(config):
     """
@@ -647,7 +631,7 @@ async def main(config):
                 bt.logging.debug(f"Current commitments: {len(list(current_commitments.values()))}")
 
                 # Decrypt submissions
-                decrypted_submissions = decrypt_submissions(current_commitments)
+                decrypted_submissions, push_timestamps = decrypt_submissions(current_commitments)
 
                 uid_to_data = {}
                 for hotkey, commit in current_commitments.items():
@@ -658,7 +642,8 @@ async def main(config):
                         if molecules is not None:
                             uid_to_data[uid] = {
                                 "molecules": molecules,
-                                "block_submitted": commit.block
+                                "block_submitted": commit.block,
+                                "push_time": push_timestamps.get(uid, '')
                             }
                         else:
                             bt.logging.error(f"No decrypted submission found for UID: {uid}")
@@ -673,7 +658,8 @@ async def main(config):
                         "target_scores": [[] for _ in range(len(target_proteins))],
                         "antitarget_scores": [[] for _ in range(len(antitarget_proteins))],
                         "entropy": None,
-                        "block_submitted": None
+                        "block_submitted": None,
+                        "push_time": uid_to_data[uid].get("push_time", '')
                     }
                     for uid in uid_to_data
                 }
