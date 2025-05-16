@@ -249,10 +249,12 @@ def molecule_unique_for_protein_hf(protein: str, molecule: str) -> bool:
     Returns True if unique (not found), False if found.
     """
     if not hasattr(molecule_unique_for_protein_hf, "_CACHE"):
-        molecule_unique_for_protein_hf._CACHE = (None, None, None)  
+        molecule_unique_for_protein_hf._CACHE = (None, None, None, 0)
     
     try:
-        cached_protein, cached_sha, molecules_set = molecule_unique_for_protein_hf._CACHE
+        cached_protein, cached_sha, molecules_set, last_check_time = molecule_unique_for_protein_hf._CACHE
+        current_time = time.time()
+        metadata_ttl = 60 
         
         if protein != cached_protein:
             bt.logging.debug(f"Switching from protein {cached_protein} to {protein}")
@@ -260,28 +262,32 @@ def molecule_unique_for_protein_hf(protein: str, molecule: str) -> bool:
         
         filename = f"{protein}_molecules.csv"
         
-        url = hf_hub_url(
-            repo_id="Metanova/Submission-Archive",
-            filename=filename,
-            repo_type="dataset"
-        )
-
-        metadata = get_hf_file_metadata(url)
-        current_sha = metadata.commit_hash
-        
-        if cached_sha != current_sha:
-            file_path = hf_hub_download(
+        if cached_sha is None or (current_time - last_check_time > metadata_ttl):
+            url = hf_hub_url(
                 repo_id="Metanova/Submission-Archive",
                 filename=filename,
-                repo_type="dataset",
-                revision=current_sha
+                repo_type="dataset"
             )
             
-            df = pd.read_csv(file_path, usecols=["Molecule_ID"])
-            molecules_set = set(df["Molecule_ID"])
-            bt.logging.debug(f"Loaded {len(molecules_set)} molecules into lookup set for {protein} (commit {current_sha[:7]})")
+            metadata = get_hf_file_metadata(url)
+            current_sha = metadata.commit_hash
+            last_check_time = current_time
             
-            molecule_unique_for_protein_hf._CACHE = (protein, current_sha, molecules_set)
+            if cached_sha != current_sha:
+                file_path = hf_hub_download(
+                    repo_id="Metanova/Submission-Archive",
+                    filename=filename,
+                    repo_type="dataset",
+                    revision=current_sha
+                )
+                
+                df = pd.read_csv(file_path, usecols=["Molecule_ID"])
+                molecules_set = set(df["Molecule_ID"])
+                bt.logging.debug(f"Loaded {len(molecules_set)} molecules into lookup set for {protein} (commit {current_sha[:7]})")
+                
+                molecule_unique_for_protein_hf._CACHE = (protein, current_sha, molecules_set, last_check_time)
+            else:
+                molecule_unique_for_protein_hf._CACHE = molecule_unique_for_protein_hf._CACHE[:3] + (last_check_time,)
         
         return molecule not in molecules_set
         
