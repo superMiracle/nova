@@ -28,6 +28,7 @@ from config.config_loader import load_config
 from my_utils import get_smiles, get_sequence_from_protein_code, get_heavy_atom_count, get_challenge_proteins_from_blockhash, compute_maccs_entropy, molecule_unique_for_protein_hf, find_chemically_identical
 from PSICHIC.wrapper import PsichicWrapper
 from btdr import QuicknetBittensorDrandTimelock
+from auto_updater import AutoUpdater
 
 psichic = PsichicWrapper()
 btd = QuicknetBittensorDrandTimelock()
@@ -629,6 +630,14 @@ async def main(config):
 
     # Check if the hotkey is registered and has at least 1000 stake.
     await check_registration(wallet, subtensor, config.netuid)
+
+    # Initialize auto-updater if enabled via environment variable
+    if os.environ.get('AUTO_UPDATE') == '1':
+        updater = AutoUpdater(logger=bt.logging)
+        asyncio.create_task(updater.start_update_loop())
+        bt.logging.info(f"Auto-updater enabled, checking for updates every {updater.UPDATE_INTERVAL} seconds")
+    else:
+        bt.logging.info("Auto-updater disabled. Set AUTO_UPDATE=1 to enable.")
 
     # Set your GitHub raw config.yaml URL here:
     GITHUB_RAW_CONFIG_URL = "https://raw.githubusercontent.com/metanova-labs/nova/main/config/config.yaml"  
