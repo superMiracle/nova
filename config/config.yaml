@@ -18,7 +18,7 @@ molecule_validation:
   min_rotatable_bonds: 1
   max_rotatable_bonds: 10
   # Number of molecules to validate
-  num_molecules: 20
+  num_molecules: 100
 
 # Competition parameters
 competition:
