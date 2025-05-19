@@ -281,9 +281,9 @@ def molecule_unique_for_protein_hf(protein: str, smiles: str) -> bool:
                     revision=current_sha
                 )
                 
-                df = pd.read_csv(file_path, usecols=["InChIKey"])
-                inchikeys_set = set(df["InChIKey"])
-                bt.logging.debug(f"Loaded {len(inchikeys_set)} InChIKeys into lookup set for {protein} (commit {current_sha[:7]})")
+                df = pd.read_csv(file_path, usecols=["InChI_Key"])
+                inchikeys_set = set(df["InChI_Key"])
+                bt.logging.debug(f"Loaded {len(inchikeys_set)} InChI Keys into lookup set for {protein} (commit {current_sha[:7]})")
                 
                 molecule_unique_for_protein_hf._CACHE = (protein, current_sha, inchikeys_set, last_check_time)
             else:
