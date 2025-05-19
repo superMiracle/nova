@@ -2,7 +2,7 @@ import asyncio
 import os
 import subprocess
 import sys
-
+import time
 class AutoUpdater:
     """Auto-updater that pulls from metanova-labs/nova main branch and restarts."""
     
@@ -76,7 +76,9 @@ class AutoUpdater:
         """Restart the process with same arguments."""
         self.logger.info(f"Restarting process with command: {' '.join(sys.argv)}")
         try:
-            os.execv(sys.executable, [sys.executable] + sys.argv[1:])
+            subprocess.Popen([sys.executable] + sys.argv)
+            time.sleep(1)
+            os._exit(0)
         except Exception as e:
             self.logger.error(f"Failed to restart process: {e}")
     
