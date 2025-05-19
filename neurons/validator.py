@@ -28,9 +28,11 @@ from config.config_loader import load_config
 from my_utils import get_smiles, get_sequence_from_protein_code, get_heavy_atom_count, get_challenge_proteins_from_blockhash, compute_maccs_entropy, molecule_unique_for_protein_hf, find_chemically_identical
 from PSICHIC.wrapper import PsichicWrapper
 from btdr import QuicknetBittensorDrandTimelock
+from auto_updater import AutoUpdater
 
 psichic = PsichicWrapper()
 btd = QuicknetBittensorDrandTimelock()
+MAX_RESPONSE_SIZE = 20 * 1024 # 20KB
 
 def get_config():
     """
@@ -124,14 +126,14 @@ async def get_commitments(subtensor, metagraph, block_hash: str, netuid: int) ->
 
 def tuple_safe_eval(input_str: str) -> tuple:
     # Limit input size to prevent overly large inputs.
-    if len(input_str) > 4096:
+    if len(input_str) > MAX_RESPONSE_SIZE:
         bt.logging.error("Input exceeds allowed size")
         return None
     
     try:
         # Safely evaluate the input string as a Python literal.
         result = literal_eval(input_str)
-    except (SyntaxError, ValueError) as e:
+    except (SyntaxError, ValueError, MemoryError, RecursionError, TypeError) as e:
         bt.logging.error(f"Input is not a valid literal: {e}")
         return None
 
@@ -152,7 +154,7 @@ def tuple_safe_eval(input_str: str) -> tuple:
     
     return result
 
-def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "bytes=0-4096"}) -> dict:
+def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": f"bytes=0-{MAX_RESPONSE_SIZE}"}) -> dict:
     """
     Decrypts submissions from validators by fetching encrypted content from GitHub URLs and decrypting them.
 
@@ -162,7 +164,7 @@ def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": "by
             - data: GitHub URL path containing the encrypted submission 
             - Other commitment metadata
         headers (dict, optional): HTTP request headers for fetching content. 
-            Defaults to {"Range": "bytes=0-4096"} to limit response size.
+            Defaults to {"Range": f"bytes=0-{MAX_RESPONSE_SIZE}"} to limit response size.
 
     Returns:
         dict: A dictionary of decrypted submissions mapped by validator UIDs.
@@ -310,7 +312,7 @@ def validate_molecules_and_calculate_entropy(
                     break
                 
                 # Check if the molecule is unique for the target protein (weekly_target)
-                if not molecule_unique_for_protein_hf(config.weekly_target, molecule):
+                if not molecule_unique_for_protein_hf(config.weekly_target, smiles):
                     bt.logging.warning(f"UID={uid}, molecule='{molecule}' is not unique for protein '{config.weekly_target}'")
                     valid_smiles = []
                     valid_names = []
@@ -629,6 +631,14 @@ async def main(config):
 
     # Check if the hotkey is registered and has at least 1000 stake.
     await check_registration(wallet, subtensor, config.netuid)
+
+    # Initialize auto-updater if enabled via environment variable
+    if os.environ.get('AUTO_UPDATE') == '1':
+        updater = AutoUpdater(logger=bt.logging)
+        asyncio.create_task(updater.start_update_loop())
+        bt.logging.info(f"Auto-updater enabled, checking for updates every {updater.UPDATE_INTERVAL} seconds")
+    else:
+        bt.logging.info("Auto-updater disabled. Set AUTO_UPDATE=1 to enable.")
 
     # Set your GitHub raw config.yaml URL here:
     GITHUB_RAW_CONFIG_URL = "https://raw.githubusercontent.com/metanova-labs/nova/main/config/config.yaml"  
