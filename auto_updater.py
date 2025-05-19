@@ -7,7 +7,7 @@ import time
 class AutoUpdater:
     """Auto-updater that pulls from metanova-labs/nova main branch and restarts."""
     
-    UPDATE_INTERVAL = 30  # Check every hour
+    UPDATE_INTERVAL = 3600  # Check every hour
     REMOTE_URL = "https://github.com/metanova-labs/nova.git"
     BRANCH = "main"
     REPO_PATH = "."  # Current directory
