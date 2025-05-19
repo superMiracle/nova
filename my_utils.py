@@ -243,16 +243,16 @@ def molecule_unique_for_protein_api(protein: str, molecule: str) -> bool:
         bt.logging.error(f"Error checking molecule uniqueness: {e}")
         return True
 
-def molecule_unique_for_protein_hf(protein: str, molecule: str) -> bool:
+def molecule_unique_for_protein_hf(protein: str, smiles: str) -> bool:
     """
-    Check if molecule exists in Hugging Face Submission-Archive dataset.
+    Check if molecule exists in Hugging Face Submission-Archive dataset by comparing InChIKeys.
     Returns True if unique (not found), False if found.
     """
     if not hasattr(molecule_unique_for_protein_hf, "_CACHE"):
         molecule_unique_for_protein_hf._CACHE = (None, None, None, 0)
     
     try:
-        cached_protein, cached_sha, molecules_set, last_check_time = molecule_unique_for_protein_hf._CACHE
+        cached_protein, cached_sha, inchikeys_set, last_check_time = molecule_unique_for_protein_hf._CACHE
         current_time = time.time()
         metadata_ttl = 60 
         
@@ -281,15 +281,22 @@ def molecule_unique_for_protein_hf(protein: str, molecule: str) -> bool:
                     revision=current_sha
                 )
                 
-                df = pd.read_csv(file_path, usecols=["Molecule_ID"])
-                molecules_set = set(df["Molecule_ID"])
-                bt.logging.debug(f"Loaded {len(molecules_set)} molecules into lookup set for {protein} (commit {current_sha[:7]})")
+                df = pd.read_csv(file_path, usecols=["InChIKey"])
+                inchikeys_set = set(df["InChIKey"])
+                bt.logging.debug(f"Loaded {len(inchikeys_set)} InChIKeys into lookup set for {protein} (commit {current_sha[:7]})")
                 
-                molecule_unique_for_protein_hf._CACHE = (protein, current_sha, molecules_set, last_check_time)
+                molecule_unique_for_protein_hf._CACHE = (protein, current_sha, inchikeys_set, last_check_time)
             else:
                 molecule_unique_for_protein_hf._CACHE = molecule_unique_for_protein_hf._CACHE[:3] + (last_check_time,)
         
-        return molecule not in molecules_set
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            bt.logging.warning(f"Could not parse SMILES string: {smiles}")
+            return True  # Assume unique if we can't parse the SMILES
+            
+        inchikey = Chem.MolToInchiKey(mol)
+        
+        return inchikey not in inchikeys_set
         
     except Exception as e:
         # Assume molecule is unique if there's an error

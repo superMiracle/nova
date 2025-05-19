@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import time
+
 class AutoUpdater:
     """Auto-updater that pulls from metanova-labs/nova main branch and restarts."""
     

@@ -311,7 +311,7 @@ def validate_molecules_and_calculate_entropy(
                     break
                 
                 # Check if the molecule is unique for the target protein (weekly_target)
-                if not molecule_unique_for_protein_hf(config.weekly_target, molecule):
+                if not molecule_unique_for_protein_hf(config.weekly_target, smiles):
                     bt.logging.warning(f"UID={uid}, molecule='{molecule}' is not unique for protein '{config.weekly_target}'")
                     valid_smiles = []
                     valid_names = []
