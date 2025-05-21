@@ -8,8 +8,9 @@ molecule_validation:
   # Scoring weights for target/antitarget binding
   antitarget_weight: 0.75
   # Scoring weights for entropy
-  entropy_weight: 1
   entropy_bonus_threshold: 0
+  entropy_start_weight: 1.0
+  entropy_step_size: -0.1
   # Scoring weights for molecule repetition
   molecule_repetition_weight: 0
   molecule_repetition_threshold: 0

@@ -12,6 +12,7 @@ import math
 import pandas as pd
 from huggingface_hub import hf_hub_download, hf_hub_url, get_hf_file_metadata
 import time
+import datetime
 
 load_dotenv(override=True)
 
@@ -323,3 +324,16 @@ def find_chemically_identical(smiles_list: list[str]) -> dict:
     duplicates = {k: v for k, v in inchikey_to_indices.items() if len(v) > 1}
     
     return duplicates
+
+def calculate_dynamic_entropy(starting_weight: float, step_size: float) -> float:
+    """
+    Calculate entropy weight based on day of week.
+    """
+    current_date = datetime.datetime.now(datetime.timezone.utc)
+    day_of_week = current_date.weekday()  # Monday=0, Sunday=6
+    
+    entropy_weight = starting_weight + (day_of_week * step_size)
+    entropy_weight = max(0, entropy_weight)
+    
+    bt.logging.info(f"Day {day_of_week}, entropy weight: {entropy_weight}")
+    return entropy_weight

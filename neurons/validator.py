@@ -25,7 +25,7 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(BASE_DIR)
 
 from config.config_loader import load_config
-from my_utils import get_smiles, get_sequence_from_protein_code, get_heavy_atom_count, get_challenge_proteins_from_blockhash, compute_maccs_entropy, molecule_unique_for_protein_hf, find_chemically_identical
+from my_utils import get_smiles, get_sequence_from_protein_code, get_heavy_atom_count, get_challenge_proteins_from_blockhash, compute_maccs_entropy, molecule_unique_for_protein_hf, find_chemically_identical, calculate_dynamic_entropy
 from PSICHIC.wrapper import PsichicWrapper
 from btdr import QuicknetBittensorDrandTimelock
 from auto_updater import AutoUpdater
@@ -443,7 +443,8 @@ def score_protein_for_all_uids(
 def calculate_final_scores(
     score_dict: dict[int, dict[str, list[list[float]]]],
     valid_molecules_by_uid: dict[int, dict[str, list[str]]],
-    molecule_name_counts: dict[str, int]
+    molecule_name_counts: dict[str, int],
+    config: dict
 ) -> dict[int, dict[str, list[list[float]]]]:
     """
     Calculates final scores per molecule for each UID, considering target and antitarget scores.
@@ -452,7 +453,12 @@ def calculate_final_scores(
     """
     best_score = -math.inf
     best_uid = None
-
+    
+    dynamic_entropy_weight = calculate_dynamic_entropy(
+        starting_weight=config['entropy_start_weight'],
+        step_size=config['entropy_step_size']
+    )
+    
     # Go through each UID scored
     for uid, data in valid_molecules_by_uid.items():
         print(score_dict[uid])
@@ -517,7 +523,7 @@ def calculate_final_scores(
                 
         # Apply entropy bonus for scores above threshold
         if score_dict[uid]['final_score'] > config['entropy_bonus_threshold'] and entropy is not None:
-            score_dict[uid]['final_score'] = score_dict[uid]['final_score'] * (config['entropy_weight'] + entropy)
+            score_dict[uid]['final_score'] = score_dict[uid]['final_score'] * (1 + (dynamic_entropy_weight * entropy))
         
         # Log details
         # Prepare detailed log info
@@ -533,6 +539,7 @@ def calculate_final_scores(
             f"  Target scores per molecule: {target_scores_per_mol}",
             f"  Antitarget scores per molecule: {antitarget_scores_per_mol}",
             f"  Entropy: {entropy}",
+            f"  Dynamic entropy weight: {dynamic_entropy_weight}",
             f"  Final score: {score_dict[uid]['final_score']}"
         ]
         bt.logging.info("\n".join(log_lines))
@@ -743,7 +750,7 @@ async def main(config):
                         is_target=False
                     )
 
-                score_dict = calculate_final_scores(score_dict, valid_molecules_by_uid, molecule_name_counts)
+                score_dict = calculate_final_scores(score_dict, valid_molecules_by_uid, molecule_name_counts, config)
 
                 winning_uid = determine_winner(score_dict)
 
