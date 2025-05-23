@@ -75,6 +75,9 @@ def main():
                 break
             else:
                 print("set_weights returned a non-success response. Will retry if attempts remain.")
+                if attempt < max_retries - 1:
+                    print(f"Retrying in {delay_between_retries} seconds...")
+                    time.sleep(delay_between_retries)
 
         except Exception as e:
             print(f"Error setting weights: {e}")
