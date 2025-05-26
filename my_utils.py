@@ -325,15 +325,14 @@ def find_chemically_identical(smiles_list: list[str]) -> dict:
     
     return duplicates
 
-def calculate_dynamic_entropy(starting_weight: float, step_size: float) -> float:
+def calculate_dynamic_entropy(starting_weight: float, step_size: float, start_epoch: int, current_epoch: int) -> float:
     """
-    Calculate entropy weight based on day of week.
+    Calculate entropy weight based on epochs elapsed since start epoch.
     """
-    current_date = datetime.datetime.now(datetime.timezone.utc)
-    day_of_week = current_date.weekday()  # Monday=0, Sunday=6
+    epochs_elapsed = current_epoch - start_epoch
     
-    entropy_weight = starting_weight + (day_of_week * step_size)
+    entropy_weight = starting_weight + (epochs_elapsed * step_size)
     entropy_weight = max(0, entropy_weight)
     
-    bt.logging.info(f"Day {day_of_week}, entropy weight: {entropy_weight}")
+    bt.logging.info(f"Epochs elapsed: {epochs_elapsed}, entropy weight: {entropy_weight}")
     return entropy_weight

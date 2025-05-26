@@ -444,7 +444,8 @@ def calculate_final_scores(
     score_dict: dict[int, dict[str, list[list[float]]]],
     valid_molecules_by_uid: dict[int, dict[str, list[str]]],
     molecule_name_counts: dict[str, int],
-    config: dict
+    config: dict,
+    current_epoch: int
 ) -> dict[int, dict[str, list[list[float]]]]:
     """
     Calculates final scores per molecule for each UID, considering target and antitarget scores.
@@ -456,7 +457,9 @@ def calculate_final_scores(
     
     dynamic_entropy_weight = calculate_dynamic_entropy(
         starting_weight=config['entropy_start_weight'],
-        step_size=config['entropy_step_size']
+        step_size=config['entropy_step_size'],
+        start_epoch=config['entropy_start_epoch'],
+        current_epoch=current_epoch
     )
     
     # Go through each UID scored
@@ -668,6 +671,8 @@ async def main(config):
                 try:
                     start_block = current_block - config.epoch_length
                     start_block_hash = await subtensor.determine_block_hash(start_block)
+                    
+                    current_epoch = current_block // config.epoch_length
 
                     proteins = get_challenge_proteins_from_blockhash(
                         block_hash=start_block_hash,
@@ -750,7 +755,7 @@ async def main(config):
                         is_target=False
                     )
 
-                score_dict = calculate_final_scores(score_dict, valid_molecules_by_uid, molecule_name_counts, config)
+                score_dict = calculate_final_scores(score_dict, valid_molecules_by_uid, molecule_name_counts, config, current_epoch)
 
                 winning_uid = determine_winner(score_dict)
 

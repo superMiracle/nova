@@ -25,6 +25,7 @@ def load_config(path: str = "config/config.yaml"):
     num_molecules = validation_config["num_molecules"]
     entropy_bonus_threshold = validation_config["entropy_bonus_threshold"]
     entropy_start_weight = validation_config["entropy_start_weight"]
+    entropy_start_epoch = validation_config["entropy_start_epoch"]
     entropy_step_size = validation_config["entropy_step_size"]
     molecule_repetition_weight = validation_config["molecule_repetition_weight"]
     molecule_repetition_threshold = validation_config["molecule_repetition_threshold"]
@@ -40,6 +41,7 @@ def load_config(path: str = "config/config.yaml"):
         'num_molecules': num_molecules,
         'entropy_bonus_threshold': entropy_bonus_threshold,
         'entropy_start_weight': entropy_start_weight,
+        'entropy_start_epoch': entropy_start_epoch,
         'entropy_step_size': entropy_step_size,
         'molecule_repetition_weight': molecule_repetition_weight,
         'molecule_repetition_threshold': molecule_repetition_threshold

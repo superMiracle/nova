@@ -10,7 +10,8 @@ molecule_validation:
   # Scoring weights for entropy
   entropy_bonus_threshold: 0
   entropy_start_weight: 1.0
-  entropy_step_size: -0.1
+  entropy_start_epoch: 15636
+  entropy_step_size: -0.007142857  # -1/140 to decrease by 1.0 over about 1 week
   # Scoring weights for molecule repetition
   molecule_repetition_weight: 0
   molecule_repetition_threshold: 0
