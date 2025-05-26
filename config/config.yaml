@@ -1,6 +1,6 @@
 # Number of targets and antitargets to select
 protein_selection:
-  weekly_target: "P23975"
+  weekly_target: "P23977"
   num_antitargets: 4  
 
 # Parameters for validating and scoring molecules
