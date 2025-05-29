@@ -562,7 +562,7 @@ def determine_winner(score_dict: dict[int, dict[str, list[list[float]]]]) -> Opt
         if 'final_score' not in data:
             continue
             
-        final_score = data['final_score']
+        final_score = round(data['final_score'], 3)
         
         if final_score > best_score:
             best_score = final_score
@@ -576,7 +576,9 @@ def determine_winner(score_dict: dict[int, dict[str, list[list[float]]]]) -> Opt
     
     # If only one winner, return it
     if len(best_uids) == 1:
-        bt.logging.info(f"Winner: UID={best_uids[0]}, winning_score={best_score}")
+        winner_block = score_dict[best_uids[0]].get('block_submitted')
+        current_epoch = winner_block // 361 if winner_block else None
+        bt.logging.info(f"Epoch {current_epoch} winner: UID={best_uids[0]}, winning_score={best_score}")
         return best_uids[0]
     
     def parse_timestamp(uid):
@@ -594,13 +596,11 @@ def determine_winner(score_dict: dict[int, dict[str, list[list[float]]]]) -> Opt
         uid
     ))[0]
     
-
-    block_num = score_dict[winner].get('block_submitted')
+    winner_block = score_dict[winner].get('block_submitted')
+    current_epoch = winner_block // 361 if winner_block else None
     push_time = score_dict[winner].get('push_time', '')
     
-    tiebreaker_message = f"Tiebreaker winner: UID={winner}, score={best_score}"
-    if block_num:
-        tiebreaker_message += f", block={block_num}"
+    tiebreaker_message = f"Epoch {current_epoch} tiebreaker winner: UID={winner}, score={best_score}, block={winner_block}"
     if push_time:
         tiebreaker_message += f", push_time={push_time}"
         
