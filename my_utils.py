@@ -11,6 +11,7 @@ import numpy as np
 import math
 import pandas as pd
 from huggingface_hub import hf_hub_download, hf_hub_url, get_hf_file_metadata
+from huggingface_hub.errors import EntryNotFoundError
 import time
 import datetime
 
@@ -299,6 +300,12 @@ def molecule_unique_for_protein_hf(protein: str, smiles: str) -> bool:
         
         return inchikey not in inchikeys_set
         
+    except EntryNotFoundError:
+        # File doesn't exist, cache empty set to avoid repeated calls
+        inchikeys_set = set()
+        molecule_unique_for_protein_hf._CACHE = (protein, 'not_found', inchikeys_set, time.time())
+        bt.logging.debug(f"File {filename} not found on HF, caching empty result")
+        return True
     except Exception as e:
         # Assume molecule is unique if there's an error
         bt.logging.warning(f"Error checking molecule in HF dataset: {e}")
