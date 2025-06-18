@@ -34,6 +34,9 @@ psichic = PsichicWrapper()
 btd = QuicknetBittensorDrandTimelock()
 MAX_RESPONSE_SIZE = 20 * 1024 # 20KB
 
+# GitHub authentication
+GITHUB_HEADERS = {}
+
 def get_config():
     """
     Parse command-line arguments to set up the configuration for the wallet
@@ -154,91 +157,66 @@ def tuple_safe_eval(input_str: str) -> tuple:
     
     return result
 
-def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": f"bytes=0-{MAX_RESPONSE_SIZE}"}) -> dict:
-    """
-    Decrypts submissions from validators by fetching encrypted content from GitHub URLs and decrypting them.
+def decrypt_submissions(current_commitments: dict) -> tuple[dict, dict]:
+    """Fetch GitHub submissions and file-specific commit timestamps, then decrypt"""
 
-    Args:
-        current_commitments (dict): A dictionary of miner commitments where each value contains:
-            - uid: Miner's unique identifier
-            - data: GitHub URL path containing the encrypted submission 
-            - Other commitment metadata
-        headers (dict, optional): HTTP request headers for fetching content. 
-            Defaults to {"Range": f"bytes=0-{MAX_RESPONSE_SIZE}"} to limit response size.
-
-    Returns:
-        dict: A dictionary of decrypted submissions mapped by validator UIDs.
-            Empty if no valid submissions were found or decryption failed.
-
-    Note:
-        - Only processes commitments where data contains a '/' (indicating a GitHub URL)
-        - Uses btd.decrypt_dict for decryption of the fetched submissions
-        - Logs errors for failed HTTP requests and submission counts
-        - Implements retry logic with exponential backoff for GitHub requests
-    """
+    file_paths = [commit.data for commit in current_commitments.values() if '/' in commit.data]
+    if not file_paths:
+        return {}, {}
+    
+    github_data = {}
+    for path in set(file_paths): 
+        content_url = f"https://raw.githubusercontent.com/{path}"
+        try:
+            resp = requests.get(content_url, headers={**GITHUB_HEADERS, "Range": f"bytes=0-{MAX_RESPONSE_SIZE}"})
+            content = resp.content if resp.status_code in [200, 206] else None
+            if content is None:
+                bt.logging.warning(f"Failed to fetch content: {resp.status_code} for https://raw.githubusercontent.com/{path}")
+        except Exception as e:
+            bt.logging.warning(f"Error fetching content for https://raw.githubusercontent.com/{path}: {e}")
+            content = None
+        
+        # Only fetch timestamp if content was successful
+        timestamp = ''
+        if content is not None:
+            parts = path.split('/')
+            if len(parts) >= 4:
+                api_url = f"https://api.github.com/repos/{parts[0]}/{parts[1]}/commits"
+                try:
+                    resp = requests.get(api_url, params={'path': '/'.join(parts[3:]), 'per_page': 1}, headers=GITHUB_HEADERS)
+                    commits = resp.json() if resp.status_code == 200 else []
+                    timestamp = commits[0]['commit']['committer']['date'] if commits else ''
+                    if not timestamp:
+                        bt.logging.warning(f"No commit history found for https://github.com/{parts[0]}/{parts[1]}/blob/{parts[2]}/{'/'.join(parts[3:])}")
+                except Exception as e:
+                    bt.logging.warning(f"Error fetching timestamp for https://github.com/{parts[0]}/{parts[1]}: {e}")
+        
+        github_data[path] = {'content': content, 'timestamp': timestamp}
+    
     encrypted_submissions = {}
     push_timestamps = {}
-    max_retries = 3
-    base_delay = 1  # seconds
-
-    for commit in current_commitments.values():
-        if '/' in commit.data: # Filter only url submissions
-            retry_count = 0
-            while retry_count < max_retries:
-                try:
-                    full_url = f"https://raw.githubusercontent.com/{commit.data}"
-                    response = requests.get(full_url, headers=headers)
-                    if response.status_code in [200, 206]:
-                        encrypted_content = response.content
-                        content_hash = hashlib.sha256(encrypted_content.decode('utf-8').encode('utf-8')).hexdigest()[:20]
-
-                        # Disregard any submissions that don't match the expected filename
-                        if not full_url.endswith(f'/{content_hash}.txt'):
-                            bt.logging.error(f"Filename for {commit.uid} is not compatible with expected content hash")
-                            break
-                        encrypted_content = encrypted_content.decode('utf-8', errors='replace')
-
-                        # Safely evaluate the input string as a Python literal.
-                        encrypted_content = tuple_safe_eval(encrypted_content)
-                        if encrypted_content is None:
-                            bt.logging.error(f"Encrypted content for {commit.uid} is not a tuple")
-                            break
-
-                        encrypted_submissions[commit.uid] = (encrypted_content[0], encrypted_content[1])
-                        
-                        try:
-                            repo_parts = commit.data.split('/')[:2]
-                            if len(repo_parts) >= 2:
-                                repo_url = f"https://api.github.com/repos/{repo_parts[0]}/{repo_parts[1]}"
-                                repo_resp = requests.get(repo_url)
-                                if repo_resp.status_code == 200:
-                                    repo_data = repo_resp.json()
-                                    push_timestamps[commit.uid] = repo_data.get('pushed_at', '')
-                        except Exception as e:
-                            bt.logging.warning(f"Error getting repo push time for UID {commit.uid}: {e}")
-                            
-                        break  # Success, exit retry loop
-                    else:
-                        retry_count += 1
-                        if retry_count < max_retries:
-                            delay = base_delay * (2 ** (retry_count - 1))  # Exponential backoff
-                            bt.logging.warning(f"Retry {retry_count}/{max_retries} for UID {commit.uid} after {delay}s delay. Status code: {response.status_code}")
-                            time.sleep(delay)
-                        else:
-                            bt.logging.error(f"Failed to fetch encrypted submission after {max_retries} retries: {response.status_code}")
-                            bt.logging.error(f"uid: {commit.uid}, commited data: {commit.data}")
-                
-                except Exception as e:
-                    retry_count += 1
-                    if retry_count < max_retries:
-                        delay = base_delay * (2 ** (retry_count - 1))  # Exponential backoff
-                        bt.logging.warning(f"Retry {retry_count}/{max_retries} for UID {commit.uid} after {delay}s delay. Error: {str(e)}")
-                        time.sleep(delay)
-                    else:
-                        bt.logging.error(f"Error handling submission for uid {commit.uid} after {max_retries} retries: {e}")
-
-    bt.logging.info(f"Encrypted submissions: {len(encrypted_submissions)}")
     
+    for commit in current_commitments.values():
+        data = github_data.get(commit.data)
+        if not data:
+            continue
+            
+        content = data.get('content')
+        push_timestamps[commit.uid] = data.get('timestamp', '')
+        
+        if not content:
+            continue
+            
+        try:
+            content_hash = hashlib.sha256(content.decode('utf-8').encode('utf-8')).hexdigest()[:20]
+            if commit.data.endswith(f'/{content_hash}.txt'):
+                encrypted_content = tuple_safe_eval(content.decode('utf-8', errors='replace'))
+                if encrypted_content:
+                    encrypted_submissions[commit.uid] = encrypted_content
+        except:
+            pass
+    
+    # Decrypt all submissions
     try:
         decrypted_submissions = btd.decrypt_dict(encrypted_submissions)
         decrypted_submissions = {k: v.split(',') for k, v in decrypted_submissions.items() if v is not None}
@@ -247,9 +225,8 @@ def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": f"b
     except Exception as e:
         bt.logging.error(f"Failed to decrypt submissions: {e}")
         decrypted_submissions = {}
-
-    bt.logging.info(f"Decrypted submissions: {len(decrypted_submissions)}")
     
+    bt.logging.info(f"GitHub: {len(file_paths)} paths → {len(decrypted_submissions)} decrypted")
     return decrypted_submissions, push_timestamps
 
 def validate_molecules_and_calculate_entropy(
@@ -262,7 +239,7 @@ def validate_molecules_and_calculate_entropy(
     Updates the score_dict with entropy values.
     
     Args:
-        uid_to_data: Dictionary mapping UIDs to their data including molecules
+        uid_to_data: Dictionary mapping UIDs to their data including moleculesxsss
         score_dict: Dictionary to store scores and entropy
         config: Configuration dictionary containing validation parameters
         
@@ -641,6 +618,13 @@ async def main(config):
 
     # Check if the hotkey is registered and has at least 1000 stake.
     await check_registration(wallet, subtensor, config.netuid)
+
+    # Check GitHub token status 
+    if os.environ.get('GITHUB_TOKEN'):
+        bt.logging.info("GitHub authentication token found")
+        GITHUB_HEADERS['Authorization'] = f"token {os.environ['GITHUB_TOKEN']}"
+    else:
+        bt.logging.warning("No GITHUB_TOKEN found. Using unauthenticated requests. For better performance and higher rate limits, add 'GITHUB_TOKEN=your_personal_access_token' to your .env file.")
 
     # Initialize auto-updater if enabled via environment variable
     if os.environ.get('AUTO_UPDATE') == '1':
