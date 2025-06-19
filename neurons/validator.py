@@ -239,7 +239,7 @@ def validate_molecules_and_calculate_entropy(
     Updates the score_dict with entropy values.
     
     Args:
-        uid_to_data: Dictionary mapping UIDs to their data including moleculesxsss
+        uid_to_data: Dictionary mapping UIDs to their data including molecules
         score_dict: Dictionary to store scores and entropy
         config: Configuration dictionary containing validation parameters
         
@@ -585,19 +585,7 @@ def determine_winner(score_dict: dict[int, dict[str, list[list[float]]]]) -> Opt
         
     return winner
 
-def download_latest_config(github_raw_url: str, local_path: str = os.path.join(BASE_DIR, "config/config.yaml")):
-    """
-    Downloads the latest config.yaml from the specified GitHub raw URL and saves it locally.
-    """
-    try:
-        response = requests.get(github_raw_url)
-        if response.status_code == 200:
-            with open(local_path, "w", encoding="utf-8") as f:
-                f.write(response.text)
-        else:
-            bt.logging.warning(f"Failed to download config.yaml from GitHub: {response.status_code}")
-    except Exception as e:
-        bt.logging.warning(f"Exception while downloading config.yaml: {e}")
+
 
 async def main(config):
     """
@@ -634,9 +622,6 @@ async def main(config):
     else:
         bt.logging.info("Auto-updater disabled. Set AUTO_UPDATE=1 to enable.")
 
-    # Set your GitHub raw config.yaml URL here:
-    GITHUB_RAW_CONFIG_URL = "https://raw.githubusercontent.com/metanova-labs/nova/main/config/config.yaml"  
-
     while True:
         try:
             # Fetch the current metagraph for the given subnet (netuid 68).
@@ -647,10 +632,8 @@ async def main(config):
             # Check if the current block marks the end of an epoch.
             if current_block % config.epoch_length == 0:
 
-                # --- Download and reload config.yaml from GitHub ---
-                download_latest_config(GITHUB_RAW_CONFIG_URL)
+                # Reload config.yaml
                 config.update(load_config())
-                # ---------------------------------------------------
 
                 try:
                     start_block = current_block - config.epoch_length
