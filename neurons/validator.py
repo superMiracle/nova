@@ -90,7 +90,7 @@ async def check_registration(wallet, subtensor, netuid):
     if (myStake < 1000):
         bt.logging.warning(f"Hotkey has less than 1000 stake, unable to validate")
 
-async def get_commitments(subtensor, metagraph, block_hash: str, netuid: int) -> dict:
+async def get_commitments(subtensor, metagraph, block_hash: str, netuid: int, min_block: int, max_block: int) -> dict:
     """
     Retrieve commitments for all miners on a given subnet (netuid) at a specific block.
 
@@ -118,7 +118,7 @@ async def get_commitments(subtensor, metagraph, block_hash: str, netuid: int) ->
     result = {}
     for uid, hotkey in enumerate(metagraph.hotkeys):
         commit = cast(dict, commits[uid])
-        if commit:
+        if commit and min_block < commit['block'] < max_block:
             result[hotkey] = SimpleNamespace(
                 uid=uid,
                 hotkey=hotkey,
@@ -672,28 +672,33 @@ async def main(config):
                     bt.logging.error(f"Error generating challenge proteins: {e}")
                     continue
 
-                # Retrieve the latest commitments (current epoch).
+                # Retrieve commitments from current epoch only
                 current_block_hash = await subtensor.determine_block_hash(current_block)
-                current_commitments = await get_commitments(subtensor, metagraph, current_block_hash, netuid=config.netuid)
-                bt.logging.debug(f"Current commitments: {len(list(current_commitments.values()))}")
+                current_commitments = await get_commitments(
+                    subtensor, 
+                    metagraph, 
+                    current_block_hash, 
+                    netuid=config.netuid,
+                    min_block=start_block,
+                    max_block=current_block - config.no_submission_blocks
+                )
+                bt.logging.debug(f"Current epoch commitments: {len(current_commitments)}")
 
                 # Decrypt submissions
                 decrypted_submissions, push_timestamps = decrypt_submissions(current_commitments)
 
                 uid_to_data = {}
                 for hotkey, commit in current_commitments.items():
-                    # Ensure submission is from the current epoch
-                    if (commit.block > current_block - config.epoch_length) and (commit.block < current_block - config.no_submission_blocks):
-                        uid = commit.uid
-                        molecules = decrypted_submissions.get(uid)
-                        if molecules is not None:
-                            uid_to_data[uid] = {
-                                "molecules": molecules,
-                                "block_submitted": commit.block,
-                                "push_time": push_timestamps.get(uid, '')
-                            }
-                        else:
-                            bt.logging.error(f"No decrypted submission found for UID: {uid}")
+                    uid = commit.uid
+                    molecules = decrypted_submissions.get(uid)
+                    if molecules is not None:
+                        uid_to_data[uid] = {
+                            "molecules": molecules,
+                            "block_submitted": commit.block,
+                            "push_time": push_timestamps.get(uid, '')
+                        }
+                    else:
+                        bt.logging.error(f"No decrypted submission found for UID: {uid}")
 
                 if not uid_to_data:
                     bt.logging.info("No valid submissions found this epoch.")
