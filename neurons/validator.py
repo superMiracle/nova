@@ -365,11 +365,20 @@ def score_protein_for_all_uids(
     score_dict: dict[int, dict[str, list[list[float]]]],
     valid_molecules_by_uid: dict[int, dict[str, list[str]]],
     col_idx: int,
-    is_target: bool = True
+    is_target: bool = True,
+    batch_size: int = 32
 ) -> None:
     """
-    Initialize PSICHIC once for 'protein' and score each UID's molecules, 
+    Initialize PSICHIC once for 'protein' and score each UID's molecules in batches,
     storing the scores for each molecule in the appropriate (target or antitarget) index of 'score_dict'.
+    
+    Args:
+        protein: Protein code to score against
+        score_dict: Dictionary to store scores
+        valid_molecules_by_uid: Dictionary of valid molecules by UID
+        col_idx: Column index for storing scores
+        is_target: Whether this is a target or antitarget protein
+        batch_size: Number of molecules to process in each batch
     """
     # Initialize PSICHIC for new protein
     bt.logging.info(f'Initializing model for protein code: {protein}')
@@ -388,34 +397,94 @@ def score_protein_for_all_uids(
                 score_dict[uid]["target_scores" if is_target else "antitarget_scores"][col_idx] = [-math.inf] * len(uid_to_data[uid]["molecules"])
             return # If we can't initialize set all scores to -inf
 
-    # Score valid molecules for each UID
+    # Collect all molecules with their metadata
+    all_molecules = []
+    molecule_metadata = []  # Store (uid, molecule_index) for each molecule
+    
     for uid, valid_molecules in valid_molecules_by_uid.items():
         if not valid_molecules['smiles']:
             score_dict[uid]["target_scores" if is_target else "antitarget_scores"][col_idx] = [-math.inf] * len(uid_to_data[uid]["molecules"])
             continue
-
-        # Score all valid molecules for this UID
-        molecule_scores = []
-        for smiles in valid_molecules['smiles']:
-            try:
-                results_df = psichic.run_validation([smiles])
-                if not results_df.empty:
-                    val = results_df.iloc[0].get('predicted_binding_affinity')
+        
+        for mol_idx, smiles in enumerate(valid_molecules['smiles']):
+            all_molecules.append(smiles)
+            molecule_metadata.append((uid, mol_idx))
+    
+    # Process molecules in batches
+    all_scores = {}  # Dictionary to store scores by (uid, mol_idx)
+    
+    for batch_start in range(0, len(all_molecules), batch_size):
+        batch_end = min(batch_start + batch_size, len(all_molecules))
+        batch_molecules = all_molecules[batch_start:batch_end]
+        batch_metadata = molecule_metadata[batch_start:batch_end]
+        
+        try:
+            # Score the entire batch at once
+            results_df = psichic.run_validation(batch_molecules)
+            
+            if not results_df.empty and len(results_df) == len(batch_molecules):
+                # Extract scores from the batch results
+                for idx, (uid, mol_idx) in enumerate(batch_metadata):
+                    val = results_df.iloc[idx].get('predicted_binding_affinity')
                     score_value = float(val) if val is not None else -math.inf
-                    molecule_scores.append(score_value)
-                else:
-                    bt.logging.warning(f"PSICHIC returned an empty DataFrame for UID={uid}.")
-                    molecule_scores.append(-math.inf)
-            except Exception as e:
-                bt.logging.error(f"Error scoring UID={uid}, molecule='{smiles}': {e}")
-                molecule_scores.append(-math.inf)
-
+                    
+                    if uid not in all_scores:
+                        all_scores[uid] = {}
+                    all_scores[uid][mol_idx] = score_value
+            else:
+                bt.logging.warning(f"PSICHIC returned unexpected results for batch {batch_start}-{batch_end}")
+                # Fall back to individual scoring for this batch
+                for idx, (smiles, (uid, mol_idx)) in enumerate(zip(batch_molecules, batch_metadata)):
+                    try:
+                        results_df = psichic.run_validation([smiles])
+                        if not results_df.empty:
+                            val = results_df.iloc[0].get('predicted_binding_affinity')
+                            score_value = float(val) if val is not None else -math.inf
+                        else:
+                            score_value = -math.inf
+                    except Exception as e:
+                        bt.logging.error(f"Error scoring molecule in fallback for UID={uid}: {e}")
+                        score_value = -math.inf
+                    
+                    if uid not in all_scores:
+                        all_scores[uid] = {}
+                    all_scores[uid][mol_idx] = score_value
+                    
+        except Exception as e:
+            bt.logging.error(f"Error scoring batch {batch_start}-{batch_end}: {e}")
+            # Fall back to individual scoring for this batch
+            for idx, (smiles, (uid, mol_idx)) in enumerate(zip(batch_molecules, batch_metadata)):
+                try:
+                    results_df = psichic.run_validation([smiles])
+                    if not results_df.empty:
+                        val = results_df.iloc[0].get('predicted_binding_affinity')
+                        score_value = float(val) if val is not None else -math.inf
+                    else:
+                        score_value = -math.inf
+                except Exception as e:
+                    bt.logging.error(f"Error scoring molecule in fallback for UID={uid}: {e}")
+                    score_value = -math.inf
+                
+                if uid not in all_scores:
+                    all_scores[uid] = {}
+                all_scores[uid][mol_idx] = score_value
+    
+    # Organize scores back into score_dict
+    for uid, valid_molecules in valid_molecules_by_uid.items():
+        if uid in all_scores:
+            # Sort by molecule index to maintain order
+            molecule_scores = [all_scores[uid][i] for i in sorted(all_scores[uid].keys())]
+        else:
+            # This UID had no valid molecules
+            molecule_scores = [-math.inf] * len(valid_molecules['smiles'])
+        
         # Store the scores for all molecules in the correct list
         if is_target:
             score_dict[uid]["target_scores"][col_idx] = molecule_scores
         else:
             score_dict[uid]["antitarget_scores"][col_idx] = molecule_scores
-
+        
+    bt.logging.info(f"Completed batch scoring for protein {protein} with {len(all_molecules)} molecules in {(len(all_molecules) + batch_size - 1) // batch_size} batches")
 
 def calculate_final_scores(
     score_dict: dict[int, dict[str, list[list[float]]]],
