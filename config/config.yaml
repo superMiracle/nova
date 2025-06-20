@@ -1,12 +1,12 @@
 # Number of targets and antitargets to select
 protein_selection:
   weekly_target: "P54219"
-  num_antitargets: 4  
+  num_antitargets: 8  
 
 # Parameters for validating and scoring molecules
 molecule_validation:
   # Scoring weights for target/antitarget binding
-  antitarget_weight: 0.75
+  antitarget_weight: 0.9
   # Scoring weights for entropy
   entropy_bonus_threshold: 0
   entropy_start_weight: 0.3
