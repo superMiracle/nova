@@ -28,10 +28,12 @@ cd nova
 SUBTENSOR_NETWORK="ws://localhost:9944" # or your chosen node
 DEVICE_OVERRIDE="cpu" # None to run on GPU
 
-# Github configs - FOR MINERS
+# GitHub authentication
+GITHUB_TOKEN="your_personal_access_token"
+
+# GitHub configs - FOR MINERS
 GITHUB_REPO_NAME="repo-name"
 GITHUB_REPO_BRANCH="repo-branch"
-GITHUB_TOKEN="your_token"
 GITHUB_REPO_OWNER="repo-owner"
 GITHUB_REPO_PATH="" # path within repo or ""
 
@@ -70,6 +72,12 @@ The project uses several configuration files:
 - Command-line arguments for runtime configuration
 - `PSICHIC/runtime_config.py`: runtime configurations for PSICHIC model
 
+### GitHub Authentication
+
+Set up GitHub authentication:
+1. Create a [Personal Access Token](https://github.com/settings/personal-access-tokens/new) on GitHub
+2. For validators: No specific permissions needed (read-only access)
+3. For miners: Grant repository access permissions for your submission repository
 
 ## For Validators
 

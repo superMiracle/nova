@@ -54,6 +54,7 @@ class PsichicWrapper:
                                               weights_only=True
                                               )
                                    )
+        self.model.eval()
         
     def initialize_protein(self, protein_seq:str) -> dict:
         allowed_chars = set(['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y', 'X'])

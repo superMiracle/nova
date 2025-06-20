@@ -34,6 +34,9 @@ psichic = PsichicWrapper()
 btd = QuicknetBittensorDrandTimelock()
 MAX_RESPONSE_SIZE = 20 * 1024 # 20KB
 
+# GitHub authentication
+GITHUB_HEADERS = {}
+
 def get_config():
     """
     Parse command-line arguments to set up the configuration for the wallet
@@ -87,7 +90,7 @@ async def check_registration(wallet, subtensor, netuid):
     if (myStake < 1000):
         bt.logging.warning(f"Hotkey has less than 1000 stake, unable to validate")
 
-async def get_commitments(subtensor, metagraph, block_hash: str, netuid: int) -> dict:
+async def get_commitments(subtensor, metagraph, block_hash: str, netuid: int, min_block: int, max_block: int) -> dict:
     """
     Retrieve commitments for all miners on a given subnet (netuid) at a specific block.
 
@@ -115,7 +118,7 @@ async def get_commitments(subtensor, metagraph, block_hash: str, netuid: int) ->
     result = {}
     for uid, hotkey in enumerate(metagraph.hotkeys):
         commit = cast(dict, commits[uid])
-        if commit:
+        if commit and min_block < commit['block'] < max_block:
             result[hotkey] = SimpleNamespace(
                 uid=uid,
                 hotkey=hotkey,
@@ -154,91 +157,66 @@ def tuple_safe_eval(input_str: str) -> tuple:
     
     return result
 
-def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": f"bytes=0-{MAX_RESPONSE_SIZE}"}) -> dict:
-    """
-    Decrypts submissions from validators by fetching encrypted content from GitHub URLs and decrypting them.
+def decrypt_submissions(current_commitments: dict) -> tuple[dict, dict]:
+    """Fetch GitHub submissions and file-specific commit timestamps, then decrypt"""
 
-    Args:
-        current_commitments (dict): A dictionary of miner commitments where each value contains:
-            - uid: Miner's unique identifier
-            - data: GitHub URL path containing the encrypted submission 
-            - Other commitment metadata
-        headers (dict, optional): HTTP request headers for fetching content. 
-            Defaults to {"Range": f"bytes=0-{MAX_RESPONSE_SIZE}"} to limit response size.
-
-    Returns:
-        dict: A dictionary of decrypted submissions mapped by validator UIDs.
-            Empty if no valid submissions were found or decryption failed.
-
-    Note:
-        - Only processes commitments where data contains a '/' (indicating a GitHub URL)
-        - Uses btd.decrypt_dict for decryption of the fetched submissions
-        - Logs errors for failed HTTP requests and submission counts
-        - Implements retry logic with exponential backoff for GitHub requests
-    """
+    file_paths = [commit.data for commit in current_commitments.values() if '/' in commit.data]
+    if not file_paths:
+        return {}, {}
+    
+    github_data = {}
+    for path in set(file_paths): 
+        content_url = f"https://raw.githubusercontent.com/{path}"
+        try:
+            resp = requests.get(content_url, headers={**GITHUB_HEADERS, "Range": f"bytes=0-{MAX_RESPONSE_SIZE}"})
+            content = resp.content if resp.status_code in [200, 206] else None
+            if content is None:
+                bt.logging.warning(f"Failed to fetch content: {resp.status_code} for https://raw.githubusercontent.com/{path}")
+        except Exception as e:
+            bt.logging.warning(f"Error fetching content for https://raw.githubusercontent.com/{path}: {e}")
+            content = None
+        
+        # Only fetch timestamp if content was successful
+        timestamp = ''
+        if content is not None:
+            parts = path.split('/')
+            if len(parts) >= 4:
+                api_url = f"https://api.github.com/repos/{parts[0]}/{parts[1]}/commits"
+                try:
+                    resp = requests.get(api_url, params={'path': '/'.join(parts[3:]), 'per_page': 1}, headers=GITHUB_HEADERS)
+                    commits = resp.json() if resp.status_code == 200 else []
+                    timestamp = commits[0]['commit']['committer']['date'] if commits else ''
+                    if not timestamp:
+                        bt.logging.warning(f"No commit history found for https://github.com/{parts[0]}/{parts[1]}/blob/{parts[2]}/{'/'.join(parts[3:])}")
+                except Exception as e:
+                    bt.logging.warning(f"Error fetching timestamp for https://github.com/{parts[0]}/{parts[1]}: {e}")
+        
+        github_data[path] = {'content': content, 'timestamp': timestamp}
+    
     encrypted_submissions = {}
     push_timestamps = {}
-    max_retries = 3
-    base_delay = 1  # seconds
-
-    for commit in current_commitments.values():
-        if '/' in commit.data: # Filter only url submissions
-            retry_count = 0
-            while retry_count < max_retries:
-                try:
-                    full_url = f"https://raw.githubusercontent.com/{commit.data}"
-                    response = requests.get(full_url, headers=headers)
-                    if response.status_code in [200, 206]:
-                        encrypted_content = response.content
-                        content_hash = hashlib.sha256(encrypted_content.decode('utf-8').encode('utf-8')).hexdigest()[:20]
-
-                        # Disregard any submissions that don't match the expected filename
-                        if not full_url.endswith(f'/{content_hash}.txt'):
-                            bt.logging.error(f"Filename for {commit.uid} is not compatible with expected content hash")
-                            break
-                        encrypted_content = encrypted_content.decode('utf-8', errors='replace')
-
-                        # Safely evaluate the input string as a Python literal.
-                        encrypted_content = tuple_safe_eval(encrypted_content)
-                        if encrypted_content is None:
-                            bt.logging.error(f"Encrypted content for {commit.uid} is not a tuple")
-                            break
-
-                        encrypted_submissions[commit.uid] = (encrypted_content[0], encrypted_content[1])
-                        
-                        try:
-                            repo_parts = commit.data.split('/')[:2]
-                            if len(repo_parts) >= 2:
-                                repo_url = f"https://api.github.com/repos/{repo_parts[0]}/{repo_parts[1]}"
-                                repo_resp = requests.get(repo_url)
-                                if repo_resp.status_code == 200:
-                                    repo_data = repo_resp.json()
-                                    push_timestamps[commit.uid] = repo_data.get('pushed_at', '')
-                        except Exception as e:
-                            bt.logging.warning(f"Error getting repo push time for UID {commit.uid}: {e}")
-                            
-                        break  # Success, exit retry loop
-                    else:
-                        retry_count += 1
-                        if retry_count < max_retries:
-                            delay = base_delay * (2 ** (retry_count - 1))  # Exponential backoff
-                            bt.logging.warning(f"Retry {retry_count}/{max_retries} for UID {commit.uid} after {delay}s delay. Status code: {response.status_code}")
-                            time.sleep(delay)
-                        else:
-                            bt.logging.error(f"Failed to fetch encrypted submission after {max_retries} retries: {response.status_code}")
-                            bt.logging.error(f"uid: {commit.uid}, commited data: {commit.data}")
-                
-                except Exception as e:
-                    retry_count += 1
-                    if retry_count < max_retries:
-                        delay = base_delay * (2 ** (retry_count - 1))  # Exponential backoff
-                        bt.logging.warning(f"Retry {retry_count}/{max_retries} for UID {commit.uid} after {delay}s delay. Error: {str(e)}")
-                        time.sleep(delay)
-                    else:
-                        bt.logging.error(f"Error handling submission for uid {commit.uid} after {max_retries} retries: {e}")
-
-    bt.logging.info(f"Encrypted submissions: {len(encrypted_submissions)}")
     
+    for commit in current_commitments.values():
+        data = github_data.get(commit.data)
+        if not data:
+            continue
+            
+        content = data.get('content')
+        push_timestamps[commit.uid] = data.get('timestamp', '')
+        
+        if not content:
+            continue
+            
+        try:
+            content_hash = hashlib.sha256(content.decode('utf-8').encode('utf-8')).hexdigest()[:20]
+            if commit.data.endswith(f'/{content_hash}.txt'):
+                encrypted_content = tuple_safe_eval(content.decode('utf-8', errors='replace'))
+                if encrypted_content:
+                    encrypted_submissions[commit.uid] = encrypted_content
+        except:
+            pass
+    
+    # Decrypt all submissions
     try:
         decrypted_submissions = btd.decrypt_dict(encrypted_submissions)
         decrypted_submissions = {k: v.split(',') for k, v in decrypted_submissions.items() if v is not None}
@@ -247,9 +225,8 @@ def decrypt_submissions(current_commitments: dict, headers: dict = {"Range": f"b
     except Exception as e:
         bt.logging.error(f"Failed to decrypt submissions: {e}")
         decrypted_submissions = {}
-
-    bt.logging.info(f"Decrypted submissions: {len(decrypted_submissions)}")
     
+    bt.logging.info(f"GitHub: {len(file_paths)} paths → {len(decrypted_submissions)} decrypted")
     return decrypted_submissions, push_timestamps
 
 def validate_molecules_and_calculate_entropy(
@@ -383,62 +360,124 @@ def count_molecule_names(valid_molecules_by_uid: dict[int, dict[str, list[str]]]
                 
     return name_counts
 
-def score_protein_for_all_uids(
-    protein: str,
+def score_all_proteins_batched(
+    target_proteins: list[str],
+    antitarget_proteins: list[str],
     score_dict: dict[int, dict[str, list[list[float]]]],
     valid_molecules_by_uid: dict[int, dict[str, list[str]]],
-    col_idx: int,
-    is_target: bool = True
+    batch_size: int = 32
 ) -> None:
     """
-    Initialize PSICHIC once for 'protein' and score each UID's molecules, 
-    storing the scores for each molecule in the appropriate (target or antitarget) index of 'score_dict'.
+    Score all molecules against all proteins using efficient batching.
+    This replaces the need to call score_protein_for_all_uids multiple times.
+    
+    Args:
+        target_proteins: List of target protein codes
+        antitarget_proteins: List of antitarget protein codes
+        score_dict: Dictionary to store scores
+        valid_molecules_by_uid: Dictionary of valid molecules by UID
+        batch_size: Number of molecules to process in each batch
     """
-    # Initialize PSICHIC for new protein
-    bt.logging.info(f'Initializing model for protein code: {protein}')
-    protein_sequence = get_sequence_from_protein_code(protein)
-    try:
-        psichic.run_challenge_start(protein_sequence)
-        bt.logging.info('Model initialized successfully.')
-    except Exception as e:
+    all_proteins = target_proteins + antitarget_proteins
+    
+    # Process each protein
+    for protein_idx, protein in enumerate(all_proteins):
+        is_target = protein_idx < len(target_proteins)
+        col_idx = protein_idx if is_target else protein_idx - len(target_proteins)
+        
+        # Initialize PSICHIC for this protein
+        bt.logging.info(f'Initializing model for protein code: {protein}')
+        protein_sequence = get_sequence_from_protein_code(protein)
+        
         try:
-            os.system(f"wget -O {os.path.join(BASE_DIR, 'PSICHIC/trained_weights/TREAT1/model.pt')} https://huggingface.co/Metanova/TREAT-1/resolve/main/model.pt")
             psichic.run_challenge_start(protein_sequence)
             bt.logging.info('Model initialized successfully.')
         except Exception as e:
-            bt.logging.error(f'Error initializing model: {e}')
-            for uid in uid_to_data:
-                score_dict[uid]["target_scores" if is_target else "antitarget_scores"][col_idx] = [-math.inf] * len(uid_to_data[uid]["molecules"])
-            return # If we can't initialize set all scores to -inf
-
-    # Score valid molecules for each UID
-    for uid, valid_molecules in valid_molecules_by_uid.items():
-        if not valid_molecules['smiles']:
-            score_dict[uid]["target_scores" if is_target else "antitarget_scores"][col_idx] = [-math.inf] * len(uid_to_data[uid]["molecules"])
-            continue
-
-        # Score all valid molecules for this UID
-        molecule_scores = []
-        for smiles in valid_molecules['smiles']:
             try:
-                results_df = psichic.run_validation([smiles])
-                if not results_df.empty:
-                    val = results_df.iloc[0].get('predicted_binding_affinity')
-                    score_value = float(val) if val is not None else -math.inf
-                    molecule_scores.append(score_value)
-                else:
-                    bt.logging.warning(f"PSICHIC returned an empty DataFrame for UID={uid}.")
-                    molecule_scores.append(-math.inf)
+                os.system(f"wget -O {os.path.join(BASE_DIR, 'PSICHIC/trained_weights/TREAT1/model.pt')} https://huggingface.co/Metanova/TREAT-1/resolve/main/model.pt")
+                psichic.run_challenge_start(protein_sequence)
+                bt.logging.info('Model initialized successfully.')
             except Exception as e:
-                bt.logging.error(f"Error scoring UID={uid}, molecule='{smiles}': {e}")
-                molecule_scores.append(-math.inf)
+                bt.logging.error(f'Error initializing model: {e}')
+                # Set all scores to -inf for this protein
+                for uid in score_dict:
+                    num_molecules = len(valid_molecules_by_uid.get(uid, {}).get('smiles', []))
+                    if num_molecules == 0:
+                        num_molecules = len(uid_to_data.get(uid, {}).get("molecules", []))
+                    score_dict[uid]["target_scores" if is_target else "antitarget_scores"][col_idx] = [-math.inf] * num_molecules
+                continue
+        
+        # Collect all unique molecules across all UIDs
+        unique_molecules = {}  # {smiles: [(uid, mol_idx), ...]}
+        
+        for uid, valid_molecules in valid_molecules_by_uid.items():
+            if not valid_molecules.get('smiles'):
+                # Set -inf scores for UIDs with no valid molecules
+                num_molecules = len(uid_to_data.get(uid, {}).get("molecules", []))
+                score_dict[uid]["target_scores" if is_target else "antitarget_scores"][col_idx] = [-math.inf] * num_molecules
+                continue
+            
+            for mol_idx, smiles in enumerate(valid_molecules['smiles']):
+                if smiles not in unique_molecules:
+                    unique_molecules[smiles] = []
+                unique_molecules[smiles].append((uid, mol_idx))
+        
+        # Process unique molecules in batches
+        unique_smiles_list = list(unique_molecules.keys())
+        molecule_scores = {}  # {smiles: score}
+        
+        for batch_start in range(0, len(unique_smiles_list), batch_size):
+            batch_end = min(batch_start + batch_size, len(unique_smiles_list))
+            batch_molecules = unique_smiles_list[batch_start:batch_end]
+            
+            try:
+                # Score the batch
+                results_df = psichic.run_validation(batch_molecules)
+                
+                if not results_df.empty and len(results_df) == len(batch_molecules):
+                    for idx, smiles in enumerate(batch_molecules):
+                        val = results_df.iloc[idx].get('predicted_binding_affinity')
+                        score_value = float(val) if val is not None else -math.inf
+                        molecule_scores[smiles] = score_value
+                else:
+                    bt.logging.warning(f"Unexpected results for batch, falling back to individual scoring")
+                    for smiles in batch_molecules:
+                        molecule_scores[smiles] = score_molecule_individually(smiles)
+            except Exception as e:
+                bt.logging.error(f"Error scoring batch: {e}")
+                for smiles in batch_molecules:
+                    molecule_scores[smiles] = score_molecule_individually(smiles)
+        
+        # Distribute scores to all UIDs
+        for uid, valid_molecules in valid_molecules_by_uid.items():
+            if not valid_molecules.get('smiles'):
+                continue
+            
+            uid_scores = []
+            for smiles in valid_molecules['smiles']:
+                score = molecule_scores.get(smiles, -math.inf)
+                uid_scores.append(score)
+            
+            if is_target:
+                score_dict[uid]["target_scores"][col_idx] = uid_scores
+            else:
+                score_dict[uid]["antitarget_scores"][col_idx] = uid_scores
+        
+        bt.logging.info(f"Completed scoring for protein {protein}: {len(unique_molecules)} unique molecules")
 
-        # Store the scores for all molecules in the correct list
-        if is_target:
-            score_dict[uid]["target_scores"][col_idx] = molecule_scores
+
+def score_molecule_individually(smiles: str) -> float:
+    """Helper function to score a single molecule."""
+    try:
+        results_df = psichic.run_validation([smiles])
+        if not results_df.empty:
+            val = results_df.iloc[0].get('predicted_binding_affinity')
+            return float(val) if val is not None else -math.inf
         else:
-            score_dict[uid]["antitarget_scores"][col_idx] = molecule_scores
-
+            return -math.inf
+    except Exception as e:
+        bt.logging.error(f"Error scoring molecule {smiles}: {e}")
+        return -math.inf
 
 def calculate_final_scores(
     score_dict: dict[int, dict[str, list[list[float]]]],
@@ -608,19 +647,7 @@ def determine_winner(score_dict: dict[int, dict[str, list[list[float]]]]) -> Opt
         
     return winner
 
-def download_latest_config(github_raw_url: str, local_path: str = os.path.join(BASE_DIR, "config/config.yaml")):
-    """
-    Downloads the latest config.yaml from the specified GitHub raw URL and saves it locally.
-    """
-    try:
-        response = requests.get(github_raw_url)
-        if response.status_code == 200:
-            with open(local_path, "w", encoding="utf-8") as f:
-                f.write(response.text)
-        else:
-            bt.logging.warning(f"Failed to download config.yaml from GitHub: {response.status_code}")
-    except Exception as e:
-        bt.logging.warning(f"Exception while downloading config.yaml: {e}")
+
 
 async def main(config):
     """
@@ -642,6 +669,13 @@ async def main(config):
     # Check if the hotkey is registered and has at least 1000 stake.
     await check_registration(wallet, subtensor, config.netuid)
 
+    # Check GitHub token status 
+    if os.environ.get('GITHUB_TOKEN'):
+        bt.logging.info("GitHub authentication token found")
+        GITHUB_HEADERS['Authorization'] = f"token {os.environ['GITHUB_TOKEN']}"
+    else:
+        bt.logging.warning("No GITHUB_TOKEN found. Using unauthenticated requests. For better performance and higher rate limits, add 'GITHUB_TOKEN=your_personal_access_token' to your .env file.")
+
     # Initialize auto-updater if enabled via environment variable
     if os.environ.get('AUTO_UPDATE') == '1':
         updater = AutoUpdater(logger=bt.logging)
@@ -649,9 +683,6 @@ async def main(config):
         bt.logging.info(f"Auto-updater enabled, checking for updates every {updater.UPDATE_INTERVAL} seconds")
     else:
         bt.logging.info("Auto-updater disabled. Set AUTO_UPDATE=1 to enable.")
-
-    # Set your GitHub raw config.yaml URL here:
-    GITHUB_RAW_CONFIG_URL = "https://raw.githubusercontent.com/metanova-labs/nova/main/config/config.yaml"  
 
     while True:
         try:
@@ -663,10 +694,8 @@ async def main(config):
             # Check if the current block marks the end of an epoch.
             if current_block % config.epoch_length == 0:
 
-                # --- Download and reload config.yaml from GitHub ---
-                download_latest_config(GITHUB_RAW_CONFIG_URL)
+                # Reload config.yaml
                 config.update(load_config())
-                # ---------------------------------------------------
 
                 try:
                     start_block = current_block - config.epoch_length
@@ -688,28 +717,33 @@ async def main(config):
                     bt.logging.error(f"Error generating challenge proteins: {e}")
                     continue
 
-                # Retrieve the latest commitments (current epoch).
+                # Retrieve commitments from current epoch only
                 current_block_hash = await subtensor.determine_block_hash(current_block)
-                current_commitments = await get_commitments(subtensor, metagraph, current_block_hash, netuid=config.netuid)
-                bt.logging.debug(f"Current commitments: {len(list(current_commitments.values()))}")
+                current_commitments = await get_commitments(
+                    subtensor, 
+                    metagraph, 
+                    current_block_hash, 
+                    netuid=config.netuid,
+                    min_block=start_block,
+                    max_block=current_block - config.no_submission_blocks
+                )
+                bt.logging.debug(f"Current epoch commitments: {len(current_commitments)}")
 
                 # Decrypt submissions
                 decrypted_submissions, push_timestamps = decrypt_submissions(current_commitments)
 
                 uid_to_data = {}
                 for hotkey, commit in current_commitments.items():
-                    # Ensure submission is from the current epoch
-                    if (commit.block > current_block - config.epoch_length) and (commit.block < current_block - config.no_submission_blocks):
-                        uid = commit.uid
-                        molecules = decrypted_submissions.get(uid)
-                        if molecules is not None:
-                            uid_to_data[uid] = {
-                                "molecules": molecules,
-                                "block_submitted": commit.block,
-                                "push_time": push_timestamps.get(uid, '')
-                            }
-                        else:
-                            bt.logging.error(f"No decrypted submission found for UID: {uid}")
+                    uid = commit.uid
+                    molecules = decrypted_submissions.get(uid)
+                    if molecules is not None:
+                        uid_to_data[uid] = {
+                            "molecules": molecules,
+                            "block_submitted": commit.block,
+                            "push_time": push_timestamps.get(uid, '')
+                        }
+                    else:
+                        bt.logging.error(f"No decrypted submission found for UID: {uid}")
 
                 if not uid_to_data:
                     bt.logging.info("No valid submissions found this epoch.")
@@ -738,21 +772,12 @@ async def main(config):
                 molecule_name_counts = count_molecule_names(valid_molecules_by_uid)
 
                 # Score all target proteins then all antitarget proteins one protein at a time
-                for i, target_protein in enumerate(target_proteins):
-                    score_protein_for_all_uids(
-                        protein=target_protein,
-                        score_dict=score_dict,
-                        valid_molecules_by_uid=valid_molecules_by_uid,
-                        col_idx=i,
-                        is_target=True
-                    )
-                for j, anti_protein in enumerate(antitarget_proteins):
-                    score_protein_for_all_uids(
-                        protein=anti_protein,
-                        score_dict=score_dict,
-                        valid_molecules_by_uid=valid_molecules_by_uid,
-                        col_idx=j,
-                        is_target=False
+                score_all_proteins_batched(
+                    target_proteins=target_proteins,
+                    antitarget_proteins=antitarget_proteins,
+                    score_dict=score_dict,
+                    valid_molecules_by_uid=valid_molecules_by_uid,
+                    batch_size=32
                     )
 
                 score_dict = calculate_final_scores(score_dict, valid_molecules_by_uid, molecule_name_counts, config, current_epoch)
