@@ -93,6 +93,11 @@ def get_smiles_from_reaction(product_name):
         _, rxn_id, mol1_id, mol2_id = parts
         rxn_id, mol1_id, mol2_id = int(rxn_id), int(mol1_id), int(mol2_id)
         
+        # Currently only accept reductive amination products
+        if rxn_id != 2:
+            bt.logging.warning(f"Not accepting reaction with rxn_id={rxn_id}, only accepting reductive amination (rxn_id=2)")
+            return None
+        
         db_path = os.path.join(os.path.dirname(__file__), "combinatorial_db", "molecules.sqlite")
         if not os.path.exists(db_path):
             bt.logging.error(f"Database not found: {db_path}")
