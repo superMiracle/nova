@@ -1,5 +1,7 @@
 import asyncio
+import hashlib
 import os
+import requests
 import subprocess
 import sys
 import time
@@ -93,18 +95,66 @@ class AutoUpdater:
                     await asyncio.sleep(self.UPDATE_INTERVAL)
                     continue
                 
-                if self._check_for_updates():
-                    self.logger.info("Updates available, pulling changes")
+                code_updates = self._check_for_updates()
+                if code_updates:
+                    self.logger.info("Code updates available, pulling changes")
                     
                     if self._pull_updates():
-                        self.logger.info("Updates successfully applied, restarting")
+                        self.logger.info("Code updates successfully applied, restarting")
                         self._restart_process()
                         self.logger.error("Failed to restart after update")
                 else:
-                    self.logger.info("No updates available")
+                    self.logger.info("No code updates available")
+                
+                try:
+                    if self._update_database():
+                        self.logger.info("Database updated successfully")
+                except Exception as e:
+                    self.logger.error(f"Error updating database: {e}")
                     
             except Exception as e:
                 self.logger.error(f"Error in update loop: {e}")
                 
             self.logger.info(f"Next update check in {self.UPDATE_INTERVAL} seconds")
             await asyncio.sleep(self.UPDATE_INTERVAL) 
+
+    def _update_database(self):
+        """Check and update database if needed."""
+        db_path = "combinatorial_db/molecules.sqlite"
+        
+        try:
+            api_url = "https://huggingface.co/api/datasets/Metanova/Mol-Rxn-DB/tree/main"
+            response = requests.get(api_url, timeout=10)
+            remote_hash = None
+            for file_info in response.json():
+                if file_info.get('path') == 'molecules.sqlite':
+                    remote_hash = file_info.get('lfs', {}).get('oid')
+                    break
+            
+            if not remote_hash:
+                self.logger.warning("molecules.sqlite not found in remote repository")
+                return False
+            
+            local_hash = None
+            if os.path.exists(db_path):
+                hash_sha256 = hashlib.sha256()
+                with open(db_path, "rb") as f:
+                    for chunk in iter(lambda: f.read(4096), b""):
+                        hash_sha256.update(chunk)
+                local_hash = hash_sha256.hexdigest()
+            
+            # Download if different or missing
+            if local_hash != remote_hash:
+                self.logger.info("Updating database...")
+                os.makedirs("combinatorial_db", exist_ok=True)
+                
+                db_url = "https://huggingface.co/datasets/Metanova/Mol-Rxn-DB/resolve/main/molecules.sqlite"
+                response = requests.get(db_url)
+                with open(db_path, 'wb') as f:
+                    f.write(response.content)
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"Database update failed: {e}")
+        
+        return False
