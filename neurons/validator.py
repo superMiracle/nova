@@ -25,7 +25,7 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(BASE_DIR)
 
 from config.config_loader import load_config
-from my_utils import get_smiles, get_sequence_from_protein_code, get_heavy_atom_count, get_challenge_proteins_from_blockhash, compute_maccs_entropy, molecule_unique_for_protein_hf, find_chemically_identical, calculate_dynamic_entropy
+from my_utils import get_smiles, get_sequence_from_protein_code, get_heavy_atom_count, get_challenge_proteins_from_blockhash, compute_maccs_entropy, molecule_unique_for_protein_hf, find_chemically_identical, calculate_dynamic_entropy, monitor_validator
 from PSICHIC.wrapper import PsichicWrapper
 from btdr import QuicknetBittensorDrandTimelock
 from auto_updater import AutoUpdater
@@ -783,6 +783,16 @@ async def main(config):
                 score_dict = calculate_final_scores(score_dict, valid_molecules_by_uid, molecule_name_counts, config, current_epoch)
 
                 winning_uid = determine_winner(score_dict)
+
+                set_weights_call_block = await subtensor.get_current_block()
+                monitor_validator(
+                    score_dict=score_dict,
+                    metagraph=metagraph,
+                    current_epoch=current_epoch,
+                    current_block=set_weights_call_block,
+                    validator_hotkey=wallet.hotkey.ss58_address,
+                    winning_uid=winning_uid
+                )
 
                 if winning_uid is not None:
                     try:
