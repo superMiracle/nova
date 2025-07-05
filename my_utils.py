@@ -413,3 +413,34 @@ def calculate_dynamic_entropy(starting_weight: float, step_size: float, start_ep
     
     bt.logging.info(f"Epochs elapsed: {epochs_elapsed}, entropy weight: {entropy_weight}")
     return entropy_weight
+
+def monitor_validator(score_dict, metagraph, current_epoch, current_block, validator_hotkey, winning_uid):
+    api_key = os.environ.get('VALIDATOR_API_KEY')
+    if not api_key:
+        return
+    
+    try:
+        best_rounded_score = max([round(d['final_score'], 3) for d in score_dict.values() if 'final_score' in d], default=-math.inf)
+        
+        winning_group = []
+        for uid, data in score_dict.items():
+            if 'final_score' in data and round(data['final_score'], 3) == best_rounded_score:
+                winning_group.append({
+                    "uid": uid,
+                    "hotkey": metagraph.hotkeys[uid] if uid < len(metagraph.hotkeys) else "unknown",
+                    "final_score": data['final_score'],
+                    "blocks_elapsed": current_block - data.get('block_submitted', 0),
+                    "push_time": data.get('push_time', ''),
+                    "winner": uid == winning_uid
+                })
+        
+        requests.post("https://valiwatch-production.up.railway.app/weights-info", json={
+            "epoch": current_epoch,
+            "current_block": current_block,
+            "blocks_into_epoch": current_block % 361,
+            "validator_hotkey": validator_hotkey,
+            "winning_group": winning_group
+        }, headers={"Authorization": f"Bearer {api_key}"}, timeout=5)
+        
+    except Exception as e:
+        bt.logging.debug(f"API send failed: {e}")
