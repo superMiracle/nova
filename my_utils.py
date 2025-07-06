@@ -424,12 +424,12 @@ def monitor_validator(score_dict, metagraph, current_epoch, current_block, valid
         
         winning_group = []
         for uid, data in score_dict.items():
-            if 'final_score' in data and round(data['final_score'], 3) == best_rounded_score:
+            if 'final_score' in data and round(data['final_score'], 2) == best_rounded_score:
                 winning_group.append({
                     "uid": uid,
                     "hotkey": metagraph.hotkeys[uid] if uid < len(metagraph.hotkeys) else "unknown",
                     "final_score": data['final_score'],
-                    "blocks_elapsed": current_block - data.get('block_submitted', 0),
+                    "blocks_elapsed": (data.get('block_submitted', 0) % 361),
                     "push_time": data.get('push_time', ''),
                     "winner": uid == winning_uid
                 })
