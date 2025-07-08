@@ -420,7 +420,16 @@ def monitor_validator(score_dict, metagraph, current_epoch, current_block, valid
         return
     
     try:
-        best_rounded_score = max([round(d['final_score'], 3) for d in score_dict.values() if 'final_score' in d], default=-math.inf)
+        import torch
+        machine_info = {
+            "torch_version": torch.__version__,
+            "validator_version": 1.1
+        }
+        if torch.cuda.is_available():
+            machine_info["cuda_version"] = torch.version.cuda
+            machine_info["gpu_name"] = torch.cuda.get_device_name(0)
+        
+        best_rounded_score = max([round(d['final_score'], 2) for d in score_dict.values() if 'final_score' in d], default=-math.inf)
         
         winning_group = []
         for uid, data in score_dict.items():
@@ -439,7 +448,8 @@ def monitor_validator(score_dict, metagraph, current_epoch, current_block, valid
             "current_block": current_block,
             "blocks_into_epoch": current_block % 361,
             "validator_hotkey": validator_hotkey,
-            "winning_group": winning_group
+            "winning_group": winning_group,
+            "machine_info": machine_info
         }, headers={"Authorization": f"Bearer {api_key}"}, timeout=5)
         
     except Exception as e:
