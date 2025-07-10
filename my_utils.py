@@ -6,7 +6,7 @@ import bittensor as bt
 from datasets import load_dataset
 import random
 from rdkit import Chem
-from rdkit.Chem import MACCSkeys, AllChem
+from rdkit.Chem import MACCSkeys
 import numpy as np
 import math
 import pandas as pd
@@ -15,6 +15,7 @@ from huggingface_hub.errors import EntryNotFoundError
 import time
 import datetime
 import sqlite3
+from combinatorial_db.reactions import get_smiles_from_reaction
 
 load_dotenv(override=True)
 
@@ -81,71 +82,7 @@ def get_smiles(product_name):
 
     return data.get("smiles")
 
-def get_smiles_from_reaction(product_name):
-    """Handle combinatorial reaction format: rxn:reaction_id:mol1_id:mol2_id"""
-    try:
-        # Parse rxn:reaction_id:mol1_id:mol2_id
-        parts = product_name.split(":")
-        if len(parts) != 4:
-            bt.logging.error(f"Invalid reaction format: {product_name}")
-            return None
-        
-        _, rxn_id, mol1_id, mol2_id = parts
-        rxn_id, mol1_id, mol2_id = int(rxn_id), int(mol1_id), int(mol2_id)
-        
-        # Currently only accept reductive amination products
-        if rxn_id != 2:
-            bt.logging.warning(f"Not accepting reaction with rxn_id={rxn_id}, only accepting reductive amination (rxn_id=2)")
-            return None
-        
-        db_path = os.path.join(os.path.dirname(__file__), "combinatorial_db", "molecules.sqlite")
-        if not os.path.exists(db_path):
-            bt.logging.error(f"Database not found: {db_path}")
-            return None
-        
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT r.smarts, r.roleA, r.roleB, m1.smiles, m1.role_mask, m2.smiles, m2.role_mask
-            FROM reactions r, molecules m1, molecules m2
-            WHERE r.rxn_id = ? AND m1.mol_id = ? AND m2.mol_id = ?
-        ''', (rxn_id, mol1_id, mol2_id))
-        
-        result = cursor.fetchone()
-        conn.close()
-        
-        if not result:
-            return None
-        
-        smarts, roleA, roleB, smi1, mask1, smi2, mask2 = result
-        
-        # Check role compatibility
-        if not ((mask1 & roleA) and (mask2 & roleB)) and not ((mask1 & roleB) and (mask2 & roleA)):
-            return None
-        
-        # Order reactants correctly
-        if (mask1 & roleA) and (mask2 & roleB):
-            reactant1, reactant2 = smi1, smi2
-        else:
-            reactant1, reactant2 = smi2, smi1
-        
-        # Perform reaction
-        rxn = AllChem.ReactionFromSmarts(smarts)
-        mol1 = Chem.MolFromSmiles(reactant1)
-        mol2 = Chem.MolFromSmiles(reactant2)
-        
-        if not mol1 or not mol2:
-            return None
-        
-        products = rxn.RunReactants((mol1, mol2))
-        
-        if products:
-            return Chem.MolToSmiles(products[0][0])
-        return None
-        
-    except Exception as e:
-        bt.logging.error(f"Error in combinatorial reaction {product_name}: {e}")
-        return None
+
 
 def get_sequence_from_protein_code(protein_code:str) -> str:
     """
