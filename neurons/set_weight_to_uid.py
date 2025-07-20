@@ -8,12 +8,12 @@ import time
 def main():
     load_dotenv()
     
+    burn_rate = 0.8
+    
     # 1) Parse the single argument for target_uid
-    parser = argparse.ArgumentParser(
-        description="Set weights on netuid=68 so that only target_uid has weight=1."
-    )
+    parser = argparse.ArgumentParser(description="Set weights to target UID and burn burn_rate to UID 0.")
     parser.add_argument('--target_uid', type=int, required=True,
-                        help="The UID that will receive weight=1.0. Others = 0.0")
+                        help="Target UID to receive weight after burn rate goes to UID 0.")
     parser.add_argument('--wallet_name', type=str, required=True,
                         help="The name of the wallet to use.")
     parser.add_argument('--wallet_hotkey', type=str, required=True,
@@ -51,8 +51,9 @@ def main():
         print(f"Error: target_uid {args.target_uid} out of range [0, {n-1}]. Exiting.")
         sys.exit(1)
 
-    # Set the single weight
-    weights[args.target_uid] = 1.0
+    # Set weights: burn to UID 0, remainder to target
+    weights[0] = burn_rate
+    weights[args.target_uid] += 1.0 - burn_rate
 
     # 3) Send the weights to the chain with retry logic
     max_retries = 10
