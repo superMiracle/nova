@@ -384,7 +384,7 @@ def monitor_validator(score_dict, metagraph, current_epoch, current_block, valid
             "current_block": current_block,
             "blocks_into_epoch": current_block % 361,
             "validator_hotkey": validator_hotkey,
-            "validator_version": 1.1,
+            "validator_version": 1.2,
             "winning_group": winning_group,
             "machine_info": machine_info
         }, headers={"Authorization": f"Bearer {api_key}"}, timeout=5)
