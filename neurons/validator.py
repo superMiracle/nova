@@ -1,41 +1,54 @@
+import os
+os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+
+import argparse
 import asyncio
-from ast import literal_eval
+import binascii
+import datetime
+import hashlib
 import math
 import os
-import sys
-import argparse
-import binascii
-from typing import cast, Optional
-from types import SimpleNamespace
-import bittensor as bt
-from substrateinterface import SubstrateInterface
-import requests
-import hashlib
-import time
 import subprocess
-from dotenv import load_dotenv
-from bittensor.core.chain_data.utils import decode_metadata
+import sys
+import time
+from ast import literal_eval
+from types import SimpleNamespace
+from typing import cast, Optional
+
 import aiohttp
+import bittensor as bt
 import numpy as np
+import requests
+from bittensor.core.chain_data.utils import decode_metadata
+from dotenv import load_dotenv
 from rdkit import Chem
 from rdkit.Chem import Descriptors
-import datetime
+from substrateinterface import SubstrateInterface
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(BASE_DIR)
 
-from config.config_loader import load_config
-from my_utils import get_smiles, get_sequence_from_protein_code, get_heavy_atom_count, get_challenge_proteins_from_blockhash, compute_maccs_entropy, molecule_unique_for_protein_hf, find_chemically_identical, calculate_dynamic_entropy, monitor_validator
-from PSICHIC.wrapper import PsichicWrapper
-from btdr import QuicknetBittensorDrandTimelock
 from auto_updater import AutoUpdater
+from btdr import QuicknetBittensorDrandTimelock
+from config.config_loader import load_config
+from my_utils import (
+    calculate_dynamic_entropy,
+    compute_maccs_entropy,
+    find_chemically_identical,
+    get_challenge_proteins_from_blockhash,
+    get_heavy_atom_count,
+    get_sequence_from_protein_code,
+    get_smiles,
+    molecule_unique_for_protein_hf,
+    monitor_validator
+)
+from PSICHIC.wrapper import PsichicWrapper
+
+MAX_RESPONSE_SIZE = 20 * 1024  # 20KB
+GITHUB_HEADERS = {}
 
 psichic = PsichicWrapper()
 btd = QuicknetBittensorDrandTimelock()
-MAX_RESPONSE_SIZE = 20 * 1024 # 20KB
-
-# GitHub authentication
-GITHUB_HEADERS = {}
 
 def get_config():
     """

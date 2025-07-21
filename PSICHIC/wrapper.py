@@ -1,7 +1,8 @@
-# -*- coding: utf-8 -*-
+from .deterministic_init import setup_deterministic
 
-import json
 import os
+import json
+
 import pandas as pd
 import torch
 
@@ -10,7 +11,7 @@ from .psichic_utils.data_utils import DataLoader, virtual_screening
 from .psichic_utils import protein_init, ligand_init
 from .models.net import net
 
-from .runtime_config import RuntimeConfig
+from runtime_config import RuntimeConfig
 
 class PsichicWrapper:
     def __init__(self):
