@@ -1,5 +1,6 @@
 biopython==1.85
 bittensor==9.0.1
+cryptography==45.0.5
 datasets==3.3.2
 fair-esm==2.0.0
 huggingface-hub==0.29.1
