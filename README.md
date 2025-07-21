@@ -10,7 +10,7 @@ NOVA harnesses global compute and collective intelligence to navigate huge unexp
 
 - Ubuntu 24.04 LTS (recommended)
 - Python 3.12
-- CUDA 12.4 (for GPU support)
+- CUDA 12.6 (for GPU support)
 - Sufficient RAM for ML model operations
 - Internet connection for network participation
 
@@ -46,9 +46,9 @@ VALIDATOR_API_KEY="your_api_key"
    ```bash
    ./install_deps_cpu.sh
    ```
-   - For CUDA 12.4:
+   - For CUDA 12.6:
    ```bash
-   ./install_deps_cu124.sh
+   ./install_deps_cu126.sh
    ```
 
 4. Run:
